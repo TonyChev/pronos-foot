@@ -1,0 +1,32 @@
+name: Mise à jour des données
+
+on:
+  schedule:
+    - cron: "17 * * * *"   # toutes les heures (heure UTC)
+  workflow_dispatch:        # bouton « Run workflow » pour lancer à la main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Collecte (FotMob + cotes Unibet)
+        run: python scripts/update.py
+      - name: Enregistrement
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "Données du $(date -u +'%Y-%m-%d %H:%M') UTC"
+          git push

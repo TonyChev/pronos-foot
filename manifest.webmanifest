@@ -1,0 +1,9 @@
+{
+  "name": "Pronos Foot",
+  "short_name": "Pronos",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#e9ecf1",
+  "theme_color": "#1b1f2a",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
