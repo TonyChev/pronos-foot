@@ -9,7 +9,7 @@ const state = {
   data: null,
   day: 0,
   comp: "all",
-  open: new Set(),
+  closed: new Set(),       // matchs repliés (tous dépliés par défaut)
   mode: {},                // match id -> "all" | "ha"
   slip: new Map(),         // match id -> Set(marchés)
   slipOdds: null,          // cote totale saisie à la main
@@ -67,24 +67,21 @@ function renderMatches() {
     }),
   ].join("");
 
-  const shown = present.filter((id) => state.comp === "all" || state.comp === id);
+  // Ordre chronologique, toutes compétitions mélangées
+  const shown = all
+    .filter((m) => state.comp === "all" || state.comp === m.c)
+    .sort((x, y) => new Date(x.t) - new Date(y.t) || order.indexOf(x.c) - order.indexOf(y.c));
   if (!shown.length) {
     $("#matches").innerHTML = `<p class="empty">Aucun match ${state.day ? "demain" : "aujourd'hui"} dans tes compétitions.</p>`;
     return;
   }
-  $("#matches").innerHTML = shown.map((id) => {
-    const c = comp(id);
-    const ms = all.filter((m) => m.c === id);
-    return `<div class="comp-block">
-      <div class="comp-title"><img src="${compLogo(id)}" alt="" loading="lazy">${esc(c.name)} <span class="muted">· ${esc(c.country)}</span></div>
-      ${ms.map(matchCard).join("")}
-    </div>`;
-  }).join("");
+  $("#matches").innerHTML = shown.map(matchCard).join("");
 }
 
 function matchCard(m) {
   const h = team(m.h), a = team(m.a);
-  const open = state.open.has(m.id);
+  const c = comp(m.c);
+  const open = !state.closed.has(m.id);
   const [hs, as] = (m.score || "").split(" - ");
   let ko = `<div class="kickoff">${fmtTime(m.t)}</div>`;
   if (m.finished) ko = `<div class="kickoff">Terminé</div>`;
@@ -94,15 +91,17 @@ function matchCard(m) {
   const hint = (k) => {
     const S = [h.stats.all, a.stats.all];
     const n = S[0].n + S[1].n;
-    return n ? `${pct(S[0][k] + S[1][k], n)}%` : "";
+    return n ? pct(S[0][k] + S[1][k], n) : null;
   };
   const oddBtn = (k) => {
     const o = m.odds?.[k];
+    const p = hint(k);
     return `<button class="odd ${picked.has(k) ? "picked" : ""}" data-pick="${k}" data-id="${m.id}" ${!o || locked ? "disabled" : ""}
-      title="${MARKETS[k]} — taux de la saison des 2 équipes : ${hint(k)}">
-      <span>${SHORT[k]} <span class="pct">${hint(k)}</span></span><b>${fmtOdds(o)}</b></button>`;
+      title="${MARKETS[k]} — taux de la saison des 2 équipes : ${p ?? "–"}%">
+      <span>${SHORT[k]} ${p === null ? "" : pctSpan(p, "pct")}</span><b>${fmtOdds(o)}</b></button>`;
   };
   return `<article class="match ${open ? "open" : ""}" data-match="${m.id}">
+    <div class="match-comp"><img src="${compLogo(m.c)}" alt="" loading="lazy">${c.flag} ${esc(c.name)} <span class="muted">· ${esc(c.country)}</span></div>
     <button class="match-head" data-toggle="${m.id}" aria-expanded="${open}">
       ${ko}
       <div class="teams">
@@ -113,8 +112,78 @@ function matchCard(m) {
       <span class="chev">▾</span>
     </button>
     <div class="odds-row">${oddBtn("btts")}${oddBtn("o25")}</div>
+    ${locked ? "" : verdictHTML(m)}
     ${open ? distHTML(m) : ""}
   </article>`;
+}
+
+// 50 % ou plus en vert, moins de 50 % en rouge
+const pctSpan = (p, cls = "") => `<span class="${cls} ${p >= 50 ? "good" : "bad"}">${p}%</span>`;
+
+// ================================================================ Mon avis (modèle statistique)
+
+const poisson = (lambda, k) => {
+  let f = 1;
+  for (let i = 2; i <= k; i++) f *= i;
+  return (Math.exp(-lambda) * lambda ** k) / f;
+};
+
+// Moyenne domicile (ou extérieur) lissée vers la moyenne générale de l'équipe :
+// avec peu de matchs à domicile, on se fie davantage à l'ensemble de la saison.
+const PRIOR = 3;
+const rate = (split, all, key) => (all.n ? (split[key] + (all[key] / all.n) * PRIOR) / (split.n + PRIOR) : 0);
+
+function estimate(m) {
+  const H = team(m.h).stats, A = team(m.a).stats;
+  if (H.all.n < 4 || A.all.n < 4) return null;
+  // Buts attendus : attaque de l'un croisée avec la défense de l'autre (loi de Poisson)
+  const lh = (rate(H.home, H.all, "gf") + rate(A.away, A.all, "ga")) / 2;
+  const la = (rate(A.away, A.all, "gf") + rate(H.home, H.all, "ga")) / 2;
+  const poisBtts = (1 - Math.exp(-lh)) * (1 - Math.exp(-la));
+  const poisO25 = 1 - [0, 1, 2].reduce((s, k) => s + poisson(lh + la, k), 0);
+  // Mélange avec les fréquences réellement observées cette saison
+  const freq = (k) => (H.all[k] + A.all[k]) / (H.all.n + A.all.n);
+  return {
+    lh, la,
+    btts: 0.6 * poisBtts + 0.4 * freq("btts"),
+    o25: 0.6 * poisO25 + 0.4 * freq("o25"),
+  };
+}
+
+function marketVerdict(p, odds) {
+  if (!odds) return { level: "na", ev: null };
+  const ev = p * odds - 1;               // espérance de gain pour 1 € misé
+  if (ev >= 0.05 && p >= 0.55) return { level: "yes", ev };
+  if (ev >= -0.03 && p >= 0.5) return { level: "maybe", ev };
+  return { level: "no", ev };
+}
+
+function verdictHTML(m) {
+  const est = estimate(m);
+  if (!est) {
+    return `<div class="verdict no"><b>🤖 Mon avis : je ne miserais pas</b><span>Pas assez de matchs joués cette saison pour juger.</span></div>`;
+  }
+  const v = { btts: marketVerdict(est.btts, m.odds?.btts), o25: marketVerdict(est.o25, m.odds?.o25) };
+  const rank = { yes: 3, maybe: 2, no: 1, na: 0 };
+  const best = ["btts", "o25"].sort((x, y) => rank[v[y].level] - rank[v[x].level] || (v[y].ev ?? -9) - (v[x].ev ?? -9))[0];
+  const level = v[best].level === "na" ? "no" : v[best].level;
+  const title = {
+    yes: `je miserais sur « ${SHORT[best]} »`,
+    maybe: `jouable sur « ${SHORT[best]} », sans plus`,
+    no: "je ne miserais pas",
+  }[level];
+  const line = (k) => {
+    const p = Math.round(est[k] * 100);
+    const o = m.odds?.[k];
+    const implied = o ? Math.round(100 / o) : null;
+    const tag = { yes: "✅", maybe: "🟠", no: "❌", na: "–" }[v[k].level];
+    return `<span>${tag} ${SHORT[k]} : ${pctSpan(p)} selon moi${implied ? `, ${implied}% selon Unibet (cote ${fmtOdds(o)})` : ", pas de cote"}</span>`;
+  };
+  return `<div class="verdict ${level}">
+    <b>🤖 Mon avis : ${title}</b>
+    ${line("btts")}${line("o25")}
+    <span class="muted">Buts attendus : ${est.lh.toFixed(1).replace(".", ",")} – ${est.la.toFixed(1).replace(".", ",")} · avis statistique, pas une garantie</span>
+  </div>`;
 }
 
 function cellsHTML(values) {
@@ -143,7 +212,7 @@ function distHTML(m) {
     : `Répartition des buts ${esc(H.name)} (${label(hs.n, " à domicile")}) et ${esc(A.name)} (${label(as.n, " à l'extérieur")}), saison ${esc(c.season || "")}.`;
   const kpi = (id, name, s) => `<div class="t"><img class="logo" src="${teamLogo(id)}" alt=""><span>${esc(name)}</span></div>
     <div class="v">${s.n ? ((s.gf + s.ga) / s.n).toFixed(1).replace(".", ",") : "–"}</div>
-    <div class="v">${pct(s.btts, s.n)}%</div><div class="v">${pct(s.o25, s.n)}%</div>`;
+    <div class="v">${s.n ? pctSpan(pct(s.btts, s.n)) : "–"}</div><div class="v">${s.n ? pctSpan(pct(s.o25, s.n)) : "–"}</div>`;
   return `<div class="dist">
     <h3>Répartition des buts</h3>
     <div class="seg">
@@ -165,7 +234,7 @@ function renderUpdated() {
   const g = new Date(state.data.generatedAt);
   const min = Math.round((Date.now() - g) / 60000);
   const ago = min < 60 ? `${min} min` : `${Math.round(min / 60)} h`;
-  $("#updated").textContent = `Données mises à jour il y a ${ago} · cotes Unibet · touche un match pour ses stats`;
+  $("#updated").textContent = `Données mises à jour il y a ${ago} · cotes Unibet · touche un match pour replier ses stats`;
 }
 
 // ================================================================ Cotes en direct (Kambi / Unibet)
@@ -432,7 +501,7 @@ document.addEventListener("click", async (e) => {
     renderMatches();
   } else if (d.comp) { state.comp = d.comp === "all" ? "all" : Number(d.comp); renderMatches(); }
   else if (d.toggle) {
-    state.open.has(d.toggle) ? state.open.delete(d.toggle) : state.open.add(d.toggle);
+    state.closed.has(d.toggle) ? state.closed.delete(d.toggle) : state.closed.add(d.toggle);
     renderMatches();
   } else if (d.mode) { state.mode[d.id] = d.mode; renderMatches(); }
   else if (d.pick) {
