@@ -126,6 +126,14 @@ main { max-width: 680px; margin: 0 auto; padding: 12px 12px 0; }
 .odd .pct.good { color: var(--win); }
 .odd .pct.bad { color: var(--lose); }
 .odd.picked .good, .odd.picked .bad { color: #1b1f2a; }
+.combos summary { list-style: none; cursor: pointer; }
+.combos summary::-webkit-details-marker { display: none; }
+.combos summary h2 { margin: 0; display: flex; justify-content: space-between; }
+.combos summary h2::after { content: "▾"; color: var(--muted); font-size: 14px; }
+.combos[open] summary h2::after { content: "▴"; }
+.combo { border-top: 1px solid var(--border); padding: 10px 0 4px; margin-top: 8px; }
+.combo-leg { display: flex; flex-direction: column; gap: 1px; padding: 4px 0; font-size: 13.5px; }
+.combo-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; font-size: 13.5px; }
 .verdict {
   display: flex; flex-direction: column; gap: 3px; margin: 0 12px 10px; padding: 9px 12px;
   border-radius: 8px; font-size: 13px; border-left: 4px solid var(--pending); background: var(--surface-2);

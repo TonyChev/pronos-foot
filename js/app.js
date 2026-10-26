@@ -16,6 +16,8 @@ const state = {
   slipStake: "",
   bets: [],
   betFilter: "pending",
+  combos: [],
+  combosOpen: true,
   user: null,
 };
 
@@ -53,6 +55,7 @@ function dayMatches() {
 }
 
 function renderMatches() {
+  renderCombos();
   const all = dayMatches();
   const order = state.data.competitions.map((c) => c.id);
   const present = order.filter((id) => all.some((m) => m.c === id));
@@ -76,6 +79,50 @@ function renderMatches() {
     return;
   }
   $("#matches").innerHTML = shown.map(matchCard).join("");
+}
+
+// ================================================================ Combinés suggérés
+
+function renderCombos() {
+  const days = [0, 1].map((d) => { const x = new Date(); x.setDate(x.getDate() + d); return localDay(x); });
+  // Matchs déjà joués dans un pari en cours : on ne les repropose pas
+  const taken = new Set(state.bets.filter((b) => betStatus(b) === "pending").flatMap((b) => b.selections.map((s) => s.matchId)));
+  const picks = state.data.matches
+    .filter((m) => !m.started && !m.finished && new Date(m.t) > Date.now() && days.includes(localDay(new Date(m.t))) && !taken.has(m.id))
+    .map(bestPick)
+    .filter((p) => p && p.p >= MAYBE);
+  const pairs = [];
+  for (let i = 0; i < picks.length; i++) {
+    for (let j = i + 1; j < picks.length; j++) {
+      pairs.push({ legs: [picks[i], picks[j]].sort((x, y) => new Date(x.m.t) - new Date(y.m.t)), p: picks[i].p * picks[j].p });
+    }
+  }
+  // Les plus sûrs d'abord, chaque match n'apparaît que dans une seule suggestion
+  const used = new Set();
+  state.combos = [];
+  for (const c of pairs.sort((x, y) => y.p - x.p)) {
+    if (c.legs.some((l) => used.has(l.m.id))) continue;
+    c.legs.forEach((l) => used.add(l.m.id));
+    state.combos.push(c);
+    if (state.combos.length === 4) break;
+  }
+  const dayLabel = (iso) => (localDay(new Date(iso)) === days[0] ? "Auj." : "Demain");
+  $("#combos").innerHTML = `<details class="card combos" ${state.combosOpen ? "open" : ""}>
+    <summary><h2>🤖 Mes combinés suggérés (${state.combos.length})</h2></summary>
+    <p class="hint">Combinés de 2 matchs d'aujourd'hui et de demain, classés par chances que les 2 sélections passent.
+      Les matchs déjà dans un pari en cours sont exclus.</p>
+    ${state.combos.length ? state.combos.map((c, i) => `<div class="combo">
+      ${c.legs.map((l) => `<div class="combo-leg">
+        <span class="muted small">${dayLabel(l.m.t)} ${fmtTime(l.m.t)} · ${comp(l.m.c).flag} ${esc(comp(l.m.c).name)}</span>
+        <span><b>${esc(team(l.m.h).name)} – ${esc(team(l.m.a).name)}</b></span>
+        <span>${SHORT[l.k]} · ${pctSpan(Math.round(l.p * 100))} · cote ${fmtOdds(l.odds)}</span>
+      </div>`).join("")}
+      <div class="combo-foot">
+        <span>Les 2 passent : ${pctSpan(Math.round(c.p * 100))} · cote ≈ <b>${fmtOdds(c.legs[0].odds * c.legs[1].odds)}</b></span>
+        <button class="chip active" data-combo="${i}">Au bulletin</button>
+      </div>
+    </div>`).join("") : `<p class="muted small">Aucun match assez sûr pour l'instant.</p>`}
+  </details>`;
 }
 
 function matchCard(m) {
@@ -150,12 +197,16 @@ function estimate(m) {
   };
 }
 
-function marketVerdict(p, odds) {
-  if (!odds) return { level: "na", ev: null };
-  const ev = p * odds - 1;               // espérance de gain pour 1 € misé
-  if (ev >= 0.05 && p >= 0.55) return { level: "yes", ev };
-  if (ev >= -0.03 && p >= 0.5) return { level: "maybe", ev };
-  return { level: "no", ev };
+// L'avis ne regarde que la probabilité : en combiné, une cote basse sur un match reste utile.
+const YES = 0.68, MAYBE = 0.6;
+const level = (p) => (p >= YES ? "yes" : p >= MAYBE ? "maybe" : "no");
+
+// Meilleur marché d'un match (le plus probable) parmi ceux qui ont une cote Unibet
+function bestPick(m) {
+  const est = estimate(m);
+  if (!est) return null;
+  const k = ["btts", "o25"].filter((x) => m.odds?.[x]).sort((x, y) => est[y] - est[x])[0];
+  return k ? { m, k, p: est[k], odds: m.odds[k] } : null;
 }
 
 function verdictHTML(m) {
@@ -163,23 +214,20 @@ function verdictHTML(m) {
   if (!est) {
     return `<div class="verdict no"><b>🤖 Mon avis : je ne miserais pas</b><span>Pas assez de matchs joués cette saison pour juger.</span></div>`;
   }
-  const v = { btts: marketVerdict(est.btts, m.odds?.btts), o25: marketVerdict(est.o25, m.odds?.o25) };
-  const rank = { yes: 3, maybe: 2, no: 1, na: 0 };
-  const best = ["btts", "o25"].sort((x, y) => rank[v[y].level] - rank[v[x].level] || (v[y].ev ?? -9) - (v[x].ev ?? -9))[0];
-  const level = v[best].level === "na" ? "no" : v[best].level;
+  const best = est.btts >= est.o25 ? "btts" : "o25";
+  const lv = level(est[best]);
   const title = {
     yes: `je miserais sur « ${SHORT[best]} »`,
     maybe: `jouable sur « ${SHORT[best]} », sans plus`,
     no: "je ne miserais pas",
-  }[level];
+  }[lv];
   const line = (k) => {
     const p = Math.round(est[k] * 100);
     const o = m.odds?.[k];
-    const implied = o ? Math.round(100 / o) : null;
-    const tag = { yes: "✅", maybe: "🟠", no: "❌", na: "–" }[v[k].level];
-    return `<span>${tag} ${SHORT[k]} : ${pctSpan(p)} selon moi${implied ? `, ${implied}% selon Unibet (cote ${fmtOdds(o)})` : ", pas de cote"}</span>`;
+    const tag = { yes: "✅", maybe: "🟠", no: "❌" }[level(est[k])];
+    return `<span>${tag} ${SHORT[k]} : ${pctSpan(p)} de chances selon moi${o ? ` · cote ${fmtOdds(o)}` : " · pas de cote"}</span>`;
   };
-  return `<div class="verdict ${level}">
+  return `<div class="verdict ${lv}">
     <b>🤖 Mon avis : ${title}</b>
     ${line("btts")}${line("o25")}
     <span class="muted">Buts attendus : ${est.lh.toFixed(1).replace(".", ",")} – ${est.la.toFixed(1).replace(".", ",")} · avis statistique, pas une garantie</span>
@@ -518,6 +566,13 @@ document.addEventListener("click", async (e) => {
     state.slipOdds = null;
     renderSlip();
     renderMatches();
+  } else if (d.combo !== undefined) {
+    const c = state.combos[Number(d.combo)];
+    state.slip.clear();
+    c.legs.forEach((l) => state.slip.set(l.m.id, new Set([l.k])));
+    state.slipOdds = null;
+    renderSlip(); renderMatches(); showView("slip");
+    toast("Combiné ajouté au bulletin");
   } else if (t.id === "clear-slip") {
     state.slip.clear(); state.slipOdds = null; renderSlip(); renderMatches();
   } else if (t.id === "save-bet") saveBet();
@@ -537,6 +592,10 @@ document.addEventListener("input", (e) => {
   }
 });
 
+document.addEventListener("toggle", (e) => {
+  if (e.target.classList?.contains("combos")) state.combosOpen = e.target.open;
+}, true);
+
 document.addEventListener("change", (e) => {
   if (e.target.dataset.manual) store.update(e.target.dataset.manual, { manual: e.target.value || null });
 });
@@ -545,7 +604,7 @@ document.addEventListener("change", (e) => {
 
 async function main() {
   onUser((u) => { state.user = u?.demo ? null : u; renderUser(); renderSlip(); renderBets(); });
-  onBets((bets) => { state.bets = bets; persistScores(bets); renderBets(); });
+  onBets((bets) => { state.bets = bets; persistScores(bets); renderBets(); if (state.data) renderMatches(); });
   const storeReady = initStore().catch((e) => { console.error(e); toast("Synchronisation indisponible"); });
 
   try {
