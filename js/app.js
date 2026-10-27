@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610271623";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610271632";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -144,7 +144,10 @@ function matchCard(m) {
   else if (m.started) ko = `<div class="kickoff live">${esc(m.live || "En cours")}</div>`;
   const picked = state.slip.get(m.id) || new Set();
   const locked = m.started || m.finished;
+  // Même chiffre que dans « Mon avis » : mes chances estimées (à défaut, la fréquence observée)
+  const est = estimate(m);
   const hint = (k) => {
+    if (est) return Math.round(est[k] * 100);
     const n = h.stats.all.n + a.stats.all.n;
     return n ? Math.round(freq(m, k) * 100) : null;
   };
@@ -152,7 +155,7 @@ function matchCard(m) {
     const o = m.odds?.[k];
     const p = hint(k);
     return `<button class="odd ${picked.has(k) ? "picked" : ""}" data-pick="${k}" data-id="${m.id}" ${!o || locked ? "disabled" : ""}
-      title="${esc(marketLabel(k, h.name, a.name))} — fréquence cette saison : ${p ?? "–"}%">
+      title="${esc(marketLabel(k, h.name, a.name))} — mes chances estimées : ${p ?? "–"}%">
       <span class="odd-label">${esc(shortLabel(k, h.name, a.name))}</span>
       <span class="odd-foot">${p === null ? "<span></span>" : pctSpan(p, "pct")}<b>${fmtOdds(o)}</b></span></button>`;
   };
@@ -305,9 +308,12 @@ function distHTML(m) {
     <div class="axis">${["00'", "15'", "30'", "45'", "60'", "75'", "90'"].map((t, i) => `<span style="left:${(i / 6) * 100}%">${t}</span>`).join("")}</div>
     <p class="dist-note">${note}</p>
     <div class="kpis">
-      <div class="h" style="text-align:left">Sur ${mode === "all" ? "la saison" : "dom. / ext."}</div><div class="h">Buts/m</div><div class="h">BTTS</div><div class="h">+1,5</div><div class="h">+2,5</div><div class="h" title="Matchs où l'équipe a marqué 2 buts ou plus">Éq. +1,5</div>
+      <div class="h" style="text-align:left">Ses matchs</div><div class="h">Buts/m</div><div class="h">BTTS</div><div class="h">Match +1,5</div><div class="h">Match +2,5</div><div class="h">A marqué 2+</div>
       ${kpi(m.h, H.name, hs)}${kpi(m.a, A.name, as)}
     </div>
+    <p class="dist-note">Part des matchs de chaque équipe cette saison${mode === "all" ? "" : " (à domicile pour la 1ʳᵉ, à l'extérieur pour la 2ᵉ)"} :
+      « Match +1,5 » = au moins 2 buts dans le match, les 2 équipes confondues ; « A marqué 2+ » = l'équipe elle-même a marqué au moins 2 buts.
+      Les % des cotes et de « Mon avis » sont mes chances estimées pour ce match précis.</p>
   </div>`;
 }
 
