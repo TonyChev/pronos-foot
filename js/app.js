@@ -21,7 +21,7 @@ const state = {
   view: "matches",
   betFilter: "pending",
   combos: [],
-  combosOpen: true,
+  combosOpen: false,       // bloc des combinés suggérés replié par défaut
   user: null,
 };
 
