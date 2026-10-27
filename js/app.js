@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610271714";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610271721";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -178,7 +178,7 @@ function matchCard(m) {
 }
 
 // 50 % ou plus en vert, moins de 50 % en rouge
-const pctSpan = (p, cls = "") => `<span class="${cls} ${p >= 50 ? "good" : "bad"}">${p}%</span>`;
+const pctSpan = (p, cls = "") => `<span class="pill ${cls} ${p >= 50 ? "good" : "bad"}">${p}%</span>`;
 
 // ================================================================ Mon avis (modèle statistique)
 

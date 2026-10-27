@@ -11,7 +11,7 @@
   --text: #0b0f10;
   --muted: #637077;
   --border: #d3dde1;
-  --good: #079488;           /* turquoise foncé : lisible sur fond clair */
+  --good: #009b8d;           /* turquoise foncé : lisible sur fond clair (montants, totaux) */
   --bad: #e5175a;
   --pending: #8a979d;
   --zero: #cbd5d9;
@@ -389,3 +389,15 @@ body.locked .help-fab, body.auth-pending .help-fab { display: none; }
 .sheet-head { display: flex; justify-content: space-between; align-items: center; margin: 0 4px 10px; }
 .sheet-head h2 { margin: 0; font-size: 18px; text-transform: uppercase; font-style: italic; }
 .sheet .card:last-child { margin-bottom: 0; }
+
+/* Pourcentages en pastilles pleines, aux couleurs de la charte : bien plus visibles que du texte coloré */
+.pill, .odd .pct.pill, .combos .pill {
+  display: inline-block; padding: 1px 6px; border-radius: 3px; font-family: var(--display); font-weight: 700;
+  line-height: 1.35; font-variant-numeric: tabular-nums;
+}
+.pill.good, .odd .pct.pill.good, .combos .pill.good { background: var(--aqua); color: var(--ink); }
+.pill.bad, .odd .pct.pill.bad, .combos .pill.bad { background: var(--pink); color: #fff; }
+.odd.picked .pct.pill.good { background: var(--ink); color: var(--aqua); }
+.odd.picked .pct.pill.bad { background: var(--pink); color: #fff; }
+.odd .pct.pill { font-size: 11.5px; }
+.kpis .pill { font-size: 12px; padding: 1px 5px; }
