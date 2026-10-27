@@ -3,15 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#1b1f2a">
+  <meta name="theme-color" content="#0b0f10">
   <title>Pronos Foot</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,500;0,600;0,700;1,700&display=swap">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <header class="topbar">
-    <h1>⚽ Pronos Foot</h1>
+    <h1 class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M9 2h21l-7 28H2z" fill="#ff2a6d"/><path d="M15 7h5l-3.2 11H21l-1 4h-4.2l-1.6 6h-5l1.6-6H7.5l1-4z" fill="#fff"/></svg>
+      <span>Pronos<em>Foot</em></span>
+    </h1>
     <div class="topbar-right">
       <button id="refresh-odds" class="icon-btn" title="Actualiser les cotes Unibet">↻ Cotes</button>
       <span id="user-box"></span>
@@ -35,9 +41,9 @@
   </main>
 
   <nav class="tabbar">
-    <button data-view="matches" class="active"><span>📅</span>Matchs</button>
-    <button data-view="slip"><span>🧾</span>Bulletin <b id="slip-count" class="badge" hidden>0</b></button>
-    <button data-view="bets"><span>📊</span>Mes paris</button>
+    <button data-view="matches" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7l4 3-1.5 5h-5L8 10z"/></svg>Matchs</button>
+    <button data-view="slip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>Bulletin <b id="slip-count" class="badge" hidden>0</b></button>
+    <button data-view="bets"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16"/><path d="M7 16v-5M12 16V6M17 16v-8"/></svg>Mes paris</button>
   </nav>
 
   <div id="toast" class="toast" hidden></div>

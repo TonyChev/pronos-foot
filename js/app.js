@@ -108,7 +108,7 @@ function renderCombos() {
   }
   const dayLabel = (iso) => (localDay(new Date(iso)) === days[0] ? "Auj." : "Demain");
   $("#combos").innerHTML = `<details class="card combos" ${state.combosOpen ? "open" : ""}>
-    <summary><h2>🤖 Mes combinés suggérés (${state.combos.length})</h2></summary>
+    <summary><h2>Mes combinés suggérés (${state.combos.length})</h2></summary>
     <p class="hint">Combinés de 2 matchs d'aujourd'hui et de demain, classés par chances que les 2 sélections passent.
       Les matchs déjà dans un pari en cours sont exclus.</p>
     ${state.combos.length ? state.combos.map((c, i) => `<div class="combo">
@@ -212,7 +212,7 @@ function bestPick(m) {
 function verdictHTML(m) {
   const est = estimate(m);
   if (!est) {
-    return `<div class="verdict no"><b>🤖 Mon avis : je ne miserais pas</b><span>Pas assez de matchs joués cette saison pour juger.</span></div>`;
+    return `<div class="verdict no"><b>Mon avis : je ne miserais pas</b><span>Pas assez de matchs joués cette saison pour juger.</span></div>`;
   }
   const best = est.btts >= est.o25 ? "btts" : "o25";
   const lv = level(est[best]);
@@ -224,11 +224,11 @@ function verdictHTML(m) {
   const line = (k) => {
     const p = Math.round(est[k] * 100);
     const o = m.odds?.[k];
-    const tag = { yes: "✅", maybe: "🟠", no: "❌" }[level(est[k])];
+    const tag = `<i class="dot ${level(est[k])}"></i>`;
     return `<span>${tag} ${SHORT[k]} : ${pctSpan(p)} de chances selon moi${o ? ` · cote ${fmtOdds(o)}` : " · pas de cote"}</span>`;
   };
   return `<div class="verdict ${lv}">
-    <b>🤖 Mon avis : ${title}</b>
+    <b>Mon avis : ${title}</b>
     ${line("btts")}${line("o25")}
     <span class="muted">Buts attendus : ${est.lh.toFixed(1).replace(".", ",")} – ${est.la.toFixed(1).replace(".", ",")} · avis statistique, pas une garantie</span>
   </div>`;

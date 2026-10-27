@@ -3,7 +3,7 @@
   "short_name": "Pronos",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#e9ecf1",
-  "theme_color": "#1b1f2a",
+  "background_color": "#eef4f6",
+  "theme_color": "#0b0f10",
   "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
 }
