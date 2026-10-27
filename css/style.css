@@ -148,13 +148,16 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 .chev { color: var(--muted); transition: transform .2s; }
 .match.open .chev { transform: rotate(180deg); }
 
-.odds-row { display: flex; gap: 8px; padding: 0 12px 10px; }
+.odds-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 0 12px 6px; }
+.odds-row.team { grid-template-columns: repeat(2, 1fr); padding-bottom: 10px; }
 .odd {
-  flex: 1; display: flex; justify-content: space-between; align-items: center; gap: 6px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 2px; min-width: 0; text-align: left;
   border: 1.5px solid var(--border); background: var(--surface); border-radius: 4px; padding: 7px 10px;
   font-size: 13px; transition: background .15s, border-color .15s;
 }
 .odd b { font-family: var(--display); font-size: 17px; }
+.odd-label { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.odd-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
 .odd:not(:disabled):hover { border-color: var(--aqua); }
 .odd.picked { background: var(--aqua); border-color: var(--aqua); color: var(--ink); }
 .odd:disabled { opacity: .5; cursor: default; }
@@ -231,7 +234,7 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 }
 .axis span { position: absolute; transform: translateX(-50%); }
 .dist-note { color: var(--muted); font-size: 12.5px; margin: 12px 0 0; }
-.kpis { display: grid; grid-template-columns: 1fr auto auto auto; gap: 4px 12px; margin-top: 14px; font-size: 13px; align-items: center; }
+.kpis { display: grid; grid-template-columns: 1fr repeat(5, auto); gap: 4px 9px; margin-top: 14px; font-size: 13px; align-items: center; }
 .kpis .h { color: var(--muted); font-size: 11px; text-align: right; text-transform: uppercase; letter-spacing: .04em; }
 .kpis .v { text-align: right; font-family: var(--display); font-weight: 700; font-variant-numeric: tabular-nums; }
 .kpis .t { display: flex; gap: 6px; align-items: center; min-width: 0; }

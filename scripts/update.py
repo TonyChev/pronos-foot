@@ -191,7 +191,8 @@ def collect_fotmob(now):
 
 
 def empty_stats():
-    return {"n": 0, "gf": 0, "ga": 0, "sf": [0] * 6, "sa": [0] * 6, "btts": 0, "o25": 0}
+    # f2 / a2 : matchs où l'équipe a marqué / encaissé au moins 2 buts (marché « équipe +1,5 »)
+    return {"n": 0, "gf": 0, "ga": 0, "sf": [0] * 6, "sa": [0] * 6, "btts": 0, "o15": 0, "o25": 0, "f2": 0, "a2": 0}
 
 
 def team_stats(cache, team_ids):
@@ -205,8 +206,12 @@ def team_stats(cache, team_ids):
             for key in ("all", side):
                 s = stats[tid][key]
                 s["n"] += 1
+                own, opp = (hg, ag) if side == "home" else (ag, hg)
                 s["btts"] += hg > 0 and ag > 0
+                s["o15"] += hg + ag >= 2
                 s["o25"] += hg + ag >= 3
+                s["f2"] += own >= 2
+                s["a2"] += opp >= 2
                 for minute, is_home in m["g"]:
                     scored = bool(is_home) == (side == "home")
                     b = bucket(minute)
@@ -268,19 +273,22 @@ def similarity(a, b):
     return max(SequenceMatcher(None, a, b).ratio(), overlap)
 
 
-def extract_odds(offers):
+def extract_odds(offers, home_en, away_en):
+    """Cotes Unibet : BTTS, plus de 1,5 / 2,5 buts, et plus de 1,5 buts de chaque équipe."""
+    wanted = {
+        ("Both Teams To Score", "Yes", None): "btts",
+        ("Total Goals", "Over", 1500): "o15",
+        ("Total Goals", "Over", 2500): "o25",
+        (f"Total Goals by {home_en}", "Over", 1500): "h15",
+        (f"Total Goals by {away_en}", "Over", 1500): "a15",
+    }
     odds = {}
     for b in offers:
         label = (b.get("criterion") or {}).get("englishLabel", "")
-        if label == "Both Teams To Score":
-            for o in b.get("outcomes", []):
-                if o.get("englishLabel") == "Yes" and o.get("odds") and o.get("status", "OPEN") == "OPEN":
-                    odds["btts"] = o["odds"] / 1000
-        elif label == "Total Goals":
-            for o in b.get("outcomes", []):
-                if o.get("englishLabel") == "Over" and o.get("line") == 2500 and o.get("odds") \
-                        and o.get("status", "OPEN") == "OPEN":
-                    odds["o25"] = o["odds"] / 1000
+        for o in b.get("outcomes", []):
+            k = wanted.get((label, o.get("englishLabel"), o.get("line")))
+            if k and o.get("odds") and o.get("status", "OPEN") == "OPEN":
+                odds[k] = o["odds"] / 1000
     return odds
 
 
@@ -312,6 +320,8 @@ def attach_odds(upcoming, teams, now):
             if "kambi" in m or ev["id"] in used:
                 continue
             m["kambi"] = ev["id"]
+            # Noms anglais Kambi, utiles pour reconnaître « Total Goals by <équipe> »
+            m["kteams"] = ((ev.get("englishName") or "").split(" - ") + ["", ""])[:2]
             used.add(ev["id"])
             matched += 1
 
@@ -323,7 +333,7 @@ def attach_odds(upcoming, teams, now):
         by_event = dict(zip(ids, offers))
     for m in upcoming:
         if "kambi" in m:
-            m["odds"] = extract_odds(by_event.get(m["kambi"], []))
+            m["odds"] = extract_odds(by_event.get(m["kambi"], []), *m["kteams"])
     log(f"Cotes : {matched}/{len(upcoming)} matchs associés à Unibet")
 
 

@@ -1,7 +1,13 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610271617";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610271623";
 
-const MARKETS = { btts: "Les 2 équipes marquent", o25: "Plus de 2,5 buts" };
-const SHORT = { btts: "Les 2 marquent", o25: "+2,5 buts" };
+// Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
+const MATCH_MARKETS = ["btts", "o15", "o25"];
+const TEAM_MARKETS = ["h15", "a15"];
+const ALL_MARKETS = [...MATCH_MARKETS, ...TEAM_MARKETS];
+const MARKETS = { btts: "Les 2 équipes marquent", o15: "Plus de 1,5 buts", o25: "Plus de 2,5 buts" };
+const SHORT = { btts: "BTTS", o15: "+1,5 buts", o25: "+2,5 buts" };
+const marketLabel = (k, home, away) => MARKETS[k] ?? `${k === "h15" ? home : away} : plus de 1,5 buts`;
+const shortLabel = (k, home, away) => SHORT[k] ?? `${k === "h15" ? home : away} +1,5`;
 const KAMBI = "https://eu-offering-api.kambicdn.com/offering/v2018/ub";
 const STATUS_LABEL = { won: "Gagné", lost: "Perdu", pending: "En cours", void: "Remboursé" };
 const TX_LABEL = { deposit: "Crédit", withdraw: "Retrait", adjust: "Correction du solde" };
@@ -93,7 +99,7 @@ function renderCombos() {
   const picks = state.data.matches
     .filter((m) => !m.started && !m.finished && new Date(m.t) > Date.now() && days.includes(localDay(new Date(m.t))) && !taken.has(m.id))
     .map(bestPick)
-    .filter((p) => p && p.p >= MAYBE);
+    .filter((p) => p && p.p >= MAYBE(p.k));
   const pairs = [];
   for (let i = 0; i < picks.length; i++) {
     for (let j = i + 1; j < picks.length; j++) {
@@ -118,7 +124,7 @@ function renderCombos() {
       ${c.legs.map((l) => `<div class="combo-leg">
         <span class="muted small">${dayLabel(l.m.t)} ${fmtTime(l.m.t)} · ${comp(l.m.c).flag} ${esc(comp(l.m.c).name)}</span>
         <span><b>${esc(team(l.m.h).name)} – ${esc(team(l.m.a).name)}</b></span>
-        <span>${SHORT[l.k]} · ${pctSpan(Math.round(l.p * 100))} · cote ${fmtOdds(l.odds)}</span>
+        <span>${esc(shortLabel(l.k, team(l.m.h).name, team(l.m.a).name))} · ${pctSpan(Math.round(l.p * 100))} · cote ${fmtOdds(l.odds)}</span>
       </div>`).join("")}
       <div class="combo-foot">
         <span>Les 2 passent : ${pctSpan(Math.round(c.p * 100))} · cote ≈ <b>${fmtOdds(c.legs[0].odds * c.legs[1].odds)}</b></span>
@@ -139,16 +145,16 @@ function matchCard(m) {
   const picked = state.slip.get(m.id) || new Set();
   const locked = m.started || m.finished;
   const hint = (k) => {
-    const S = [h.stats.all, a.stats.all];
-    const n = S[0].n + S[1].n;
-    return n ? pct(S[0][k] + S[1][k], n) : null;
+    const n = h.stats.all.n + a.stats.all.n;
+    return n ? Math.round(freq(m, k) * 100) : null;
   };
   const oddBtn = (k) => {
     const o = m.odds?.[k];
     const p = hint(k);
     return `<button class="odd ${picked.has(k) ? "picked" : ""}" data-pick="${k}" data-id="${m.id}" ${!o || locked ? "disabled" : ""}
-      title="${MARKETS[k]} — taux de la saison des 2 équipes : ${p ?? "–"}%">
-      <span>${SHORT[k]} ${p === null ? "" : pctSpan(p, "pct")}</span><b>${fmtOdds(o)}</b></button>`;
+      title="${esc(marketLabel(k, h.name, a.name))} — fréquence cette saison : ${p ?? "–"}%">
+      <span class="odd-label">${esc(shortLabel(k, h.name, a.name))}</span>
+      <span class="odd-foot">${p === null ? "<span></span>" : pctSpan(p, "pct")}<b>${fmtOdds(o)}</b></span></button>`;
   };
   return `<article class="match ${open ? "open" : ""}" data-match="${m.id}">
     <div class="match-comp"><img src="${compLogo(m.c)}" alt="" loading="lazy">${c.flag} ${esc(c.name)} <span class="muted">· ${esc(c.country)}</span></div>
@@ -161,7 +167,8 @@ function matchCard(m) {
       <div class="score">${m.score ? `<span>${esc(hs)}</span><span>${esc(as)}</span>` : ""}</div>
       <span class="chev">▾</span>
     </button>
-    <div class="odds-row">${oddBtn("btts")}${oddBtn("o25")}</div>
+    <div class="odds-row">${MATCH_MARKETS.map(oddBtn).join("")}</div>
+    <div class="odds-row team">${TEAM_MARKETS.map(oddBtn).join("")}</div>
     ${locked ? "" : verdictHTML(m)}
     ${open ? distHTML(m) : ""}
   </article>`;
@@ -183,32 +190,53 @@ const poisson = (lambda, k) => {
 const PRIOR = 3;
 const rate = (split, all, key) => (all.n ? (split[key] + (all[key] / all.n) * PRIOR) / (split.n + PRIOR) : 0);
 
+// Fréquence observée cette saison. Pour « équipe +1,5 », on croise l'attaque de l'équipe
+// (matchs où elle a marqué 2 buts ou plus) avec la défense adverse (matchs où l'adversaire en a encaissé 2 ou plus).
+function freq(m, k) {
+  const H = team(m.h).stats.all, A = team(m.a).stats.all;
+  const n = H.n + A.n;
+  if (!n) return 0;
+  if (k === "h15") return (H.f2 + A.a2) / n;
+  if (k === "a15") return (A.f2 + H.a2) / n;
+  return (H[k] + A[k]) / n;
+}
+
+const atMost = (lambda, k) => [...Array(k + 1).keys()].reduce((s, i) => s + poisson(lambda, i), 0);
+
 function estimate(m) {
   const H = team(m.h).stats, A = team(m.a).stats;
   if (H.all.n < 4 || A.all.n < 4) return null;
   // Buts attendus : attaque de l'un croisée avec la défense de l'autre (loi de Poisson)
   const lh = (rate(H.home, H.all, "gf") + rate(A.away, A.all, "ga")) / 2;
   const la = (rate(A.away, A.all, "gf") + rate(H.home, H.all, "ga")) / 2;
-  const poisBtts = (1 - Math.exp(-lh)) * (1 - Math.exp(-la));
-  const poisO25 = 1 - [0, 1, 2].reduce((s, k) => s + poisson(lh + la, k), 0);
-  // Mélange avec les fréquences réellement observées cette saison
-  const freq = (k) => (H.all[k] + A.all[k]) / (H.all.n + A.all.n);
-  return {
-    lh, la,
-    btts: 0.6 * poisBtts + 0.4 * freq("btts"),
-    o25: 0.6 * poisO25 + 0.4 * freq("o25"),
+  const model = {
+    btts: (1 - Math.exp(-lh)) * (1 - Math.exp(-la)),
+    o15: 1 - atMost(lh + la, 1),
+    o25: 1 - atMost(lh + la, 2),
+    h15: 1 - atMost(lh, 1),
+    a15: 1 - atMost(la, 1),
   };
+  // Mélange avec les fréquences réellement observées cette saison
+  const est = { lh, la };
+  for (const k of ALL_MARKETS) est[k] = 0.6 * model[k] + 0.4 * freq(m, k);
+  return est;
 }
 
 // L'avis ne regarde que la probabilité : en combiné, une cote basse sur un match reste utile.
-const YES = 0.68, MAYBE = 0.6;
-const level = (p) => (p >= YES ? "yes" : p >= MAYBE ? "maybe" : "no");
+// « +1,5 buts » passe naturellement plus souvent : ses seuils sont donc plus exigeants.
+const THRESHOLDS = { o15: [0.85, 0.78] };
+const DEFAULT_THRESHOLDS = [0.68, 0.6];
+const YES = (k) => (THRESHOLDS[k] || DEFAULT_THRESHOLDS)[0];
+const MAYBE = (k) => (THRESHOLDS[k] || DEFAULT_THRESHOLDS)[1];
+const level = (p, k) => (p >= YES(k) ? "yes" : p >= MAYBE(k) ? "maybe" : "no");
+// Marge au-dessus du seuil « je miserais » : sert à choisir le marché le plus convaincant
+const margin = (est, k) => est[k] - YES(k);
 
-// Meilleur marché d'un match (le plus probable) parmi ceux qui ont une cote Unibet
+// Marché le plus convaincant d'un match parmi ceux qui ont une cote Unibet
 function bestPick(m) {
   const est = estimate(m);
   if (!est) return null;
-  const k = ["btts", "o25"].filter((x) => m.odds?.[x]).sort((x, y) => est[y] - est[x])[0];
+  const k = ALL_MARKETS.filter((x) => m.odds?.[x]).sort((x, y) => margin(est, y) - margin(est, x))[0];
   return k ? { m, k, p: est[k], odds: m.odds[k] } : null;
 }
 
@@ -217,22 +245,24 @@ function verdictHTML(m) {
   if (!est) {
     return `<div class="verdict no"><b>Mon avis : je ne miserais pas</b><span>Pas assez de matchs joués cette saison pour juger.</span></div>`;
   }
-  const best = est.btts >= est.o25 ? "btts" : "o25";
-  const lv = level(est[best]);
+  const home = team(m.h).name, away = team(m.a).name;
+  const best = [...ALL_MARKETS].sort((x, y) => margin(est, y) - margin(est, x))[0];
+  const lv = level(est[best], best);
+  const name = esc(shortLabel(best, home, away));
   const title = {
-    yes: `je miserais sur « ${SHORT[best]} »`,
-    maybe: `jouable sur « ${SHORT[best]} », sans plus`,
+    yes: `je miserais sur « ${name} »`,
+    maybe: `jouable sur « ${name} », sans plus`,
     no: "je ne miserais pas",
   }[lv];
   const line = (k) => {
     const p = Math.round(est[k] * 100);
     const o = m.odds?.[k];
-    const tag = `<i class="dot ${level(est[k])}"></i>`;
-    return `<span>${tag} ${SHORT[k]} : ${pctSpan(p)} de chances selon moi${o ? ` · cote ${fmtOdds(o)}` : " · pas de cote"}</span>`;
+    const tag = `<i class="dot ${level(est[k], k)}"></i>`;
+    return `<span>${tag} ${esc(shortLabel(k, home, away))} : ${pctSpan(p)}${o ? ` · cote ${fmtOdds(o)}` : ""}</span>`;
   };
   return `<div class="verdict ${lv}">
     <b>Mon avis : ${title}</b>
-    ${line("btts")}${line("o25")}
+    ${ALL_MARKETS.map(line).join("")}
     <span class="muted">Buts attendus : ${est.lh.toFixed(1).replace(".", ",")} – ${est.la.toFixed(1).replace(".", ",")} · avis statistique, pas une garantie</span>
   </div>`;
 }
@@ -263,7 +293,7 @@ function distHTML(m) {
     : `Répartition des buts ${esc(H.name)} (${label(hs.n, " à domicile")}) et ${esc(A.name)} (${label(as.n, " à l'extérieur")}), saison ${esc(c.season || "")}.`;
   const kpi = (id, name, s) => `<div class="t"><img class="logo" src="${teamLogo(id)}" alt=""><span>${esc(name)}</span></div>
     <div class="v">${s.n ? ((s.gf + s.ga) / s.n).toFixed(1).replace(".", ",") : "–"}</div>
-    <div class="v">${s.n ? pctSpan(pct(s.btts, s.n)) : "–"}</div><div class="v">${s.n ? pctSpan(pct(s.o25, s.n)) : "–"}</div>`;
+    ${["btts", "o15", "o25", "f2"].map((k) => `<div class="v">${s.n ? pctSpan(pct(s[k], s.n)) : "–"}</div>`).join("")}`;
   return `<div class="dist">
     <h3>Répartition des buts</h3>
     <div class="seg">
@@ -275,7 +305,7 @@ function distHTML(m) {
     <div class="axis">${["00'", "15'", "30'", "45'", "60'", "75'", "90'"].map((t, i) => `<span style="left:${(i / 6) * 100}%">${t}</span>`).join("")}</div>
     <p class="dist-note">${note}</p>
     <div class="kpis">
-      <div class="h" style="text-align:left">Sur ${mode === "all" ? "la saison" : "dom. / ext."}</div><div class="h">Buts/match</div><div class="h">BTTS</div><div class="h">+2,5</div>
+      <div class="h" style="text-align:left">Sur ${mode === "all" ? "la saison" : "dom. / ext."}</div><div class="h">Buts/m</div><div class="h">BTTS</div><div class="h">+1,5</div><div class="h">+2,5</div><div class="h" title="Matchs où l'équipe a marqué 2 buts ou plus">Éq. +1,5</div>
       ${kpi(m.h, H.name, hs)}${kpi(m.a, A.name, as)}
     </div>
   </div>`;
@@ -290,14 +320,20 @@ function renderUpdated() {
 
 // ================================================================ Cotes en direct (Kambi / Unibet)
 
-function extractOdds(offers) {
+function extractOdds(offers, [homeEn = "", awayEn = ""] = []) {
+  const wanted = {
+    "Both Teams To Score|Yes|": "btts",
+    "Total Goals|Over|1500": "o15",
+    "Total Goals|Over|2500": "o25",
+    [`Total Goals by ${homeEn}|Over|1500`]: "h15",
+    [`Total Goals by ${awayEn}|Over|1500`]: "a15",
+  };
   const odds = {};
   for (const b of offers) {
-    const label = b.criterion?.englishLabel;
     for (const o of b.outcomes || []) {
       if (!o.odds || (o.status && o.status !== "OPEN")) continue;
-      if (label === "Both Teams To Score" && o.englishLabel === "Yes") odds.btts = o.odds / 1000;
-      if (label === "Total Goals" && o.englishLabel === "Over" && o.line === 2500) odds.o25 = o.odds / 1000;
+      const k = wanted[`${b.criterion?.englishLabel}|${o.englishLabel}|${o.line ?? ""}`];
+      if (k) odds[k] = o.odds / 1000;
     }
   }
   return odds;
@@ -316,7 +352,7 @@ async function refreshOdds() {
       try {
         const r = await fetch(`${KAMBI}/betoffer/event/${m.kambi}.json?lang=fr_FR&market=FR`);
         if (!r.ok) continue;
-        const odds = extractOdds((await r.json()).betOffers || []);
+        const odds = extractOdds((await r.json()).betOffers || [], m.kteams);
         if (Object.keys(odds).length) { m.odds = odds; ok++; }
       } catch { /* réseau : on garde l'ancienne cote */ }
     }
@@ -351,7 +387,7 @@ function renderSlip() {
   const view = $("#view-slip");
   if (!count) {
     view.innerHTML = `<p class="empty">Ton bulletin est vide.<br>Dans l'onglet <b>Matchs</b>, touche une cote
-      « Les 2 marquent » ou « +2,5 buts » pour l'ajouter.</p>`;
+      (les 2 marquent, +1,5 buts, +2,5 buts ou +1,5 buts d'une équipe) pour l'ajouter.</p>`;
     return;
   }
   const suggested = suggestedOdds(sels);
@@ -367,7 +403,7 @@ function renderSlip() {
       <div>
         <div class="sel-title">${esc(team(m.h).name)} – ${esc(team(m.a).name)}</div>
         <div class="muted small">${comp(m.c).flag} ${esc(comp(m.c).name)} · ${fmtDate(m.t)} ${fmtTime(m.t)}</div>
-        <div class="sel-markets">${markets.map((mk) => `<span class="tag">${MARKETS[mk.k]} <b>${fmtOdds(mk.odds)}</b>
+        <div class="sel-markets">${markets.map((mk) => `<span class="tag">${esc(marketLabel(mk.k, team(m.h).name, team(m.a).name))} <b>${fmtOdds(mk.odds)}</b>
           <button data-unpick="${mk.k}" data-id="${m.id}" aria-label="Retirer">✕</button></span>`).join("")}</div>
       </div>
     </div>`).join("")}
@@ -436,7 +472,9 @@ async function saveBet() {
 
 // ================================================================ Mes paris
 
-const marketWon = (k, [hg, ag]) => (k === "btts" ? hg > 0 && ag > 0 : hg + ag >= 3);
+const marketWon = (k, [hg, ag]) => ({
+  btts: hg > 0 && ag > 0, o15: hg + ag >= 2, o25: hg + ag >= 3, h15: hg >= 2, a15: ag >= 2,
+})[k];
 
 function selectionScore(sel) {
   return sel.score || state.data?.results?.[sel.matchId] || null;
@@ -523,7 +561,7 @@ function betCard(b) {
         <div class="muted small">${fmtDate(s.kickoff)} ${fmtTime(s.kickoff)}</div>
         <div class="sel-markets">${s.markets.map((mk) => {
           const cls = sc ? (marketWon(mk.k, sc) ? "win" : "lose") : "";
-          return `<span class="tag ${cls}">${sc ? (marketWon(mk.k, sc) ? "✓" : "✗") : "⏳"} ${MARKETS[mk.k]}${mk.odds ? ` · ${fmtOdds(mk.odds)}` : ""}</span>`;
+          return `<span class="tag ${cls}">${sc ? (marketWon(mk.k, sc) ? "✓" : "✗") : "⏳"} ${esc(marketLabel(mk.k, s.home, s.away))}${mk.odds ? ` · ${fmtOdds(mk.odds)}` : ""}</span>`;
         }).join("")}</div>
       </div></div>`;
     }).join("")}
