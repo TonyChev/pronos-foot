@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610271642";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610271653";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -719,12 +719,17 @@ document.addEventListener("click", async (e) => {
   } else if (t.id === "save-bet") saveBet();
   else if (t.id === "refresh-odds") refreshOdds();
   else if (d.betFilter) { state.betFilter = d.betFilter; renderBets(); }
+  else if (d.legend !== undefined) $("#legend").showModal();
+  else if (d.closeLegend !== undefined) $("#legend").close();
   else if (d.tx) addTransaction(d.tx).catch((err) => { console.error(err); toast(`Erreur d'enregistrement (${err.code || err.message})`); });
   else if (d.txDelete) { if (confirm("Supprimer ce mouvement ?")) store.removeTransaction(d.txDelete); }
   else if (d.delete) { if (confirm("Supprimer ce pari ?")) store.remove(d.delete); }
   else if (d.login !== undefined) store.login().catch((err) => toast(err.code === "auth/popup-closed-by-user" ? "Connexion annulée" : "Connexion impossible"));
   else if (d.logout !== undefined) { if (confirm("Se déconnecter ?")) store.logout(); }
 });
+
+// Un clic sur le fond assombri ferme la légende
+document.addEventListener("click", (e) => { if (e.target.id === "legend") e.target.close(); });
 
 document.addEventListener("input", (e) => {
   if (e.target.id === "slip-odds") state.slipOdds = e.target.value;

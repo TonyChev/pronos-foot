@@ -350,16 +350,26 @@ body:has(.slip-bar:not([hidden])) main { padding-bottom: 72px; }
   #refresh-odds span { display: none; }
 }
 
-/* ---------- Légende des couleurs ---------- */
-.legend summary { list-style: none; cursor: pointer; }
-.legend summary::-webkit-details-marker { display: none; }
-.legend summary h2 { margin: 0; font-size: 15px; display: flex; justify-content: space-between; text-transform: uppercase; }
-.legend summary h2::after { content: "▾"; color: var(--muted); }
-.legend[open] summary h2::after { content: "▴"; }
-.legend dl { display: grid; grid-template-columns: 86px 1fr; gap: 10px 10px; margin: 12px 0 0; font-size: 13px; align-items: center; }
-.legend dt { display: flex; gap: 6px; align-items: center; font-family: var(--display); font-weight: 700; }
-.legend dd { margin: 0; }
-.legend .status { font-size: 11px; padding: 2px 10px; }
+/* ---------- Légende des couleurs (popin + bouton bulle) ---------- */
+.help-fab {
+  position: fixed; right: 16px; bottom: calc(80px + env(safe-area-inset-bottom)); z-index: 11;
+  width: 48px; height: 48px; border-radius: 50%; border: 0;
+  background: var(--pink); color: #fff; font-family: var(--display); font-size: 24px; font-weight: 700;
+  box-shadow: 0 6px 18px rgba(11, 15, 16, .25);
+}
+body:has(.slip-bar:not([hidden])) .help-fab { bottom: calc(150px + env(safe-area-inset-bottom)); }
+body.locked .help-fab, body.auth-pending .help-fab { display: none; }
+.legend-modal {
+  width: min(520px, calc(100% - 24px)); max-height: calc(100% - 48px); border: 0; border-radius: 6px;
+  padding: 16px; background: var(--surface); color: var(--text); border-top: 4px solid var(--aqua);
+}
+.legend-modal::backdrop { background: rgba(11, 15, 16, .6); }
+.legend-head { display: flex; justify-content: space-between; align-items: center; }
+.legend-head h2 { margin: 0; font-size: 17px; text-transform: uppercase; font-style: italic; }
+.legend-modal dl { display: grid; grid-template-columns: 86px 1fr; gap: 10px 10px; margin: 12px 0 0; font-size: 13px; align-items: center; }
+.legend-modal dt { display: flex; gap: 6px; align-items: center; font-family: var(--display); font-weight: 700; }
+.legend-modal dd { margin: 0; }
+.legend-modal .status { font-size: 11px; padding: 2px 10px; }
 .sw { display: inline-block; width: 22px; height: 18px; border-radius: 3px; }
 .sw.match-yes { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--aqua); }
 .sw.picked { background: var(--aqua); }

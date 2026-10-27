@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,500;0,600;0,700;1,700&display=swap">
-  <link rel="stylesheet" href="css/style.css?v=202610271642">
+  <link rel="stylesheet" href="css/style.css?v=202610271653">
 </head>
 <body>
   <header class="topbar">
@@ -41,27 +41,6 @@
       </div>
       <div id="comp-filter" class="comp-filter"></div>
       <p id="updated" class="muted small"></p>
-      <details class="card legend">
-        <summary><h2>Légende des couleurs</h2></summary>
-        <dl>
-          <dt><span class="good">64%</span> <span class="bad">40%</span></dt>
-          <dd>Pourcentages : <b class="good">turquoise</b> à partir de 50 %, <b class="bad">rose</b> en dessous.</dd>
-          <dt><i class="dot yes"></i><i class="dot maybe"></i><i class="dot no"></i></dt>
-          <dd>Mon avis : <b class="good">turquoise</b> = je miserais · <b>noir</b> = jouable, sans plus · <b class="bad">rose</b> = je ne miserais pas.
-            Seuils : 68 % (jouable dès 60 %), et 85 % pour « +1,5 buts » (jouable dès 78 %).</dd>
-          <dt><span class="sw match-yes"></span></dt>
-          <dd>Liseré turquoise à gauche d'un match : je miserais sur au moins un de ses marchés.</dd>
-          <dt><span class="sw picked"></span></dt>
-          <dd>Cote sur fond turquoise : sélectionnée dans ton bulletin.</dd>
-          <dt><span class="sw scored"></span><span class="sw conceded"></span><span class="sw zero"></span></dt>
-          <dd>Répartition des buts : <b class="good">turquoise</b> = buts marqués, <b class="bad">rose</b> = buts encaissés, gris = aucun.
-            Plus la case est foncée, plus il y a de buts dans ce quart d'heure.</dd>
-          <dt><span class="status won">Gagné</span></dt>
-          <dd>Paris : turquoise = gagné, rose = perdu, gris = en cours, noir = remboursé.</dd>
-          <dt><b class="good">+12 €</b> <b class="bad">−5 €</b></dt>
-          <dd>Montants : turquoise = positif, rose = négatif (bénéfice, solde, mouvements).</dd>
-        </dl>
-      </details>
       <div id="matches"></div>
     </section>
 
@@ -78,8 +57,34 @@
     <button data-view="bets"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16"/><path d="M7 16v-5M12 16V6M17 16v-8"/></svg>Mes paris</button>
   </nav>
 
+  <button class="help-fab" data-legend aria-label="Légende des couleurs" title="Légende des couleurs">?</button>
+  <dialog id="legend" class="legend-modal" aria-labelledby="legend-title">
+    <div class="legend-head">
+      <h2 id="legend-title">Légende des couleurs</h2>
+      <button class="rm" data-close-legend aria-label="Fermer">✕</button>
+    </div>
+        <dl>
+      <dt><span class="good">64%</span> <span class="bad">40%</span></dt>
+      <dd>Pourcentages : <b class="good">turquoise</b> à partir de 50 %, <b class="bad">rose</b> en dessous.</dd>
+      <dt><i class="dot yes"></i><i class="dot maybe"></i><i class="dot no"></i></dt>
+      <dd>Mon avis : <b class="good">turquoise</b> = je miserais · <b>noir</b> = jouable, sans plus · <b class="bad">rose</b> = je ne miserais pas.
+        Seuils : 68 % (jouable dès 60 %), et 85 % pour « +1,5 buts » (jouable dès 78 %).</dd>
+      <dt><span class="sw match-yes"></span></dt>
+      <dd>Liseré turquoise à gauche d'un match : je miserais sur au moins un de ses marchés.</dd>
+      <dt><span class="sw picked"></span></dt>
+      <dd>Cote sur fond turquoise : sélectionnée dans ton bulletin.</dd>
+      <dt><span class="sw scored"></span><span class="sw conceded"></span><span class="sw zero"></span></dt>
+      <dd>Répartition des buts : <b class="good">turquoise</b> = buts marqués, <b class="bad">rose</b> = buts encaissés, gris = aucun.
+        Plus la case est foncée, plus il y a de buts dans ce quart d'heure.</dd>
+      <dt><span class="status won">Gagné</span></dt>
+      <dd>Paris : turquoise = gagné, rose = perdu, gris = en cours, noir = remboursé.</dd>
+      <dt><b class="good">+12 €</b> <b class="bad">−5 €</b></dt>
+      <dd>Montants : turquoise = positif, rose = négatif (bénéfice, solde, mouvements).</dd>
+    </dl>
+  </dialog>
+
   <div id="toast" class="toast" hidden></div>
 
-  <script type="module" src="js/app.js?v=202610271642"></script>
+  <script type="module" src="js/app.js?v=202610271653"></script>
 </body>
 </html>
