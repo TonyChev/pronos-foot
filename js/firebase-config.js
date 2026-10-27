@@ -1,10 +1,10 @@
 // Configuration Firebase (synchronisation des paris entre téléphone et PC).
-// Colle ici l'objet affiché dans la console Firebase (voir README, étape 3).
 // Ces valeurs ne sont pas secrètes : l'accès aux données est protégé par les règles Firestore.
-// Tant que c'est vide, l'app fonctionne en mode démo (paris perdus au rechargement).
 export const firebaseConfig = {
-  // apiKey: "...",
-  // authDomain: "...",
-  // projectId: "...",
-  // appId: "...",
+  apiKey: "AIzaSyCvFCD_SzXWUbE40rvWomy6w7BvL_iUr2I",
+  authDomain: "pronos-foot-fad76.firebaseapp.com",
+  projectId: "pronos-foot-fad76",
+  storageBucket: "pronos-foot-fad76.firebasestorage.app",
+  messagingSenderId: "327161437846",
+  appId: "1:327161437846:web:ee221f896d92d9e8762cb7",
 };
