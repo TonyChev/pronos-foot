@@ -1,9 +1,11 @@
-import { initStore, store, onBets, onUser, isConfigured } from "./store.js";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js";
 
 const MARKETS = { btts: "Les 2 équipes marquent", o25: "Plus de 2,5 buts" };
 const SHORT = { btts: "Les 2 marquent", o25: "+2,5 buts" };
 const KAMBI = "https://eu-offering-api.kambicdn.com/offering/v2018/ub";
 const STATUS_LABEL = { won: "Gagné", lost: "Perdu", pending: "En cours", void: "Remboursé" };
+const TX_LABEL = { deposit: "Crédit", withdraw: "Retrait", adjust: "Correction du solde" };
+const QUICK_STAKES = [2, 5, 10, 20];
 
 const state = {
   data: null,
@@ -15,6 +17,8 @@ const state = {
   slipOdds: null,          // cote totale saisie à la main
   slipStake: "",
   bets: [],
+  transactions: [],
+  view: "matches",
   betFilter: "pending",
   combos: [],
   combosOpen: true,
@@ -344,6 +348,7 @@ function renderSlip() {
   const count = sels.reduce((n, s) => n + s.markets.length, 0);
   $("#slip-count").hidden = !count;
   $("#slip-count").textContent = count;
+  renderSlipBar(sels, count);
   const view = $("#view-slip");
   if (!count) {
     view.innerHTML = `<p class="empty">Ton bulletin est vide.<br>Dans l'onglet <b>Matchs</b>, touche une cote
@@ -356,6 +361,7 @@ function renderSlip() {
   const gain = parseNum(oddsVal) * stake;
   const sameMatch = sels.some((s) => s.markets.length > 1);
   const needLogin = isConfigured && !state.user;
+  const bal = balance();
   view.innerHTML = `<div class="card">
     <h2>${count > 1 ? `Combiné · ${count} sélections` : "Pari simple"}</h2>
     ${sels.map(({ m, markets }) => `<div class="sel">
@@ -376,6 +382,9 @@ function renderSlip() {
         <input id="slip-stake" inputmode="decimal" placeholder="ex. 5" value="${esc(state.slipStake)}">
       </label>
     </div>
+    <div class="quick-stakes">${QUICK_STAKES.map((v) => `<button class="chip" data-stake="${v}">${v} €</button>`).join("")}</div>
+    <p class="hint">Solde disponible : <b class="${bal < 0 ? "neg" : ""}">${fmtEur(bal)}</b>
+      <span id="stake-warn" class="neg" ${stake > bal ? "" : "hidden"}> · mise supérieure à ton solde</span></p>
     <p class="hint">Cote calculée : ${String(suggested).replace(".", ",")}. Corrige-la avec la cote exacte affichée par Unibet${sameMatch ? " (2 paris sur un même match = « Bet Builder » : la cote réelle est différente du produit)" : ""}.</p>
     <div class="summary-line"><span>Gain potentiel</span><b id="slip-gain">${Number.isFinite(gain) ? fmtEur(gain) : "–"}</b></div>
     ${needLogin ? `<button class="btn" data-login>Se connecter pour enregistrer</button>`
@@ -384,12 +393,23 @@ function renderSlip() {
   </div>`;
 }
 
+// Barre flottante sur l'onglet Matchs : dès qu'une cote est choisie, propose de créer le pari
+function renderSlipBar(sels = slipSelections(), count = sels.reduce((n, s) => n + s.markets.length, 0)) {
+  const bar = $("#slip-bar");
+  bar.hidden = !count || state.view !== "matches";
+  if (bar.hidden) return;
+  const odds = state.slipOdds ?? suggestedOdds(sels);
+  bar.innerHTML = `<div><b>${count} sélection${count > 1 ? "s" : ""}</b><span>cote ${esc(String(odds).replace(".", ","))}</span></div>
+    <button class="btn" data-view="slip">${count > 1 ? "Créer le combiné" : "Créer le pari"}</button>`;
+}
+
 async function saveBet() {
   const sels = slipSelections();
   const odds = parseNum($("#slip-odds").value);
   const stake = parseNum($("#slip-stake").value);
   if (!(odds > 1)) return toast("Indique la cote totale");
   if (!(stake > 0)) return toast("Indique ta mise");
+  if (stake > balance() && !confirm(`Ta mise (${fmtEur(stake)}) dépasse ton solde (${fmtEur(balance())}). Enregistrer quand même ?`)) return;
   const bet = {
     odds, stake, manual: null,
     selections: sels.map(({ m, markets }) => ({
@@ -522,20 +542,99 @@ function betCard(b) {
   </div>`;
 }
 
+// ================================================================ Portefeuille et profil
+
+const betReturn = (b) => (b.status === "won" ? b.stake * b.odds : b.status === "void" ? b.stake : 0);
+
+function wallet() {
+  const sum = (type) => state.transactions.filter((t) => t.type === type).reduce((s, t) => s + t.amount, 0);
+  const bets = state.bets.map((b) => ({ ...b, status: betStatus(b) }));
+  const staked = bets.reduce((s, b) => s + b.stake, 0);
+  const returned = bets.reduce((s, b) => s + betReturn(b), 0);
+  const pendingStake = bets.filter((b) => b.status === "pending").reduce((s, b) => s + b.stake, 0);
+  const deposits = sum("deposit"), withdrawals = sum("withdraw"), adjust = sum("adjust");
+  return {
+    deposits, withdrawals, adjust, pendingStake,
+    result: returned - (staked - pendingStake),   // gains/pertes des paris réglés
+    balance: deposits - withdrawals + adjust - staked + returned,
+  };
+}
+const balance = () => wallet().balance;
+
+function renderWallet() {
+  const box = $("#user-box");
+  if (isConfigured && !state.user) { box.innerHTML = ""; return; }
+  const b = balance();
+  box.innerHTML = `<button class="wallet ${b < 0 ? "neg" : ""}" data-view="profile" title="Mon profil et mon portefeuille">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7l12-4v4"/><circle cx="16.5" cy="13.5" r="1.2" fill="currentColor"/></svg>
+    ${fmtEur(b)}</button>`;
+}
+
+function renderProfile() {
+  const view = $("#view-profile");
+  const w = wallet();
+  const u = state.user;
+  const sign = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "");
+  const plus = (v) => `${v > 0 ? "+" : ""}${fmtEur(v)}`;
+  view.innerHTML = `<div class="card profile-head">
+    ${u?.photoURL ? `<img src="${esc(u.photoURL)}" alt="" referrerpolicy="no-referrer">` : ""}
+    <div><b>${esc(u?.displayName || "Mode démo")}</b><div class="muted small">${esc(u?.email || "Paris non sauvegardés")}</div></div>
+    ${u ? `<button class="link-btn" data-logout>Se déconnecter</button>` : ""}
+  </div>
+  <div class="card">
+    <h2>Mon portefeuille</h2>
+    <div class="wallet-balance ${w.balance < 0 ? "neg" : ""}">${fmtEur(w.balance)}</div>
+    <div class="stats-grid">
+      <div class="stat"><b>${fmtEur(w.deposits)}</b><span>crédité</span></div>
+      <div class="stat"><b>${fmtEur(w.withdrawals)}</b><span>retiré</span></div>
+      <div class="stat"><b class="${sign(w.result)}">${plus(w.result)}</b><span>résultat des paris</span></div>
+    </div>
+    <p class="hint">Solde = crédits − retraits − mises + gains${w.adjust ? ` (dont ${plus(w.adjust)} de corrections)` : ""}.
+      ${w.pendingStake ? `${fmtEur(w.pendingStake)} actuellement en jeu.` : ""}</p>
+    <label class="field" style="margin-top:12px">Montant (€)
+      <input id="tx-amount" inputmode="decimal" placeholder="ex. 50">
+    </label>
+    <div class="grid2" style="margin-top:10px">
+      <button class="btn" data-tx="deposit">Créditer</button>
+      <button class="btn dark" data-tx="withdraw">Retirer</button>
+    </div>
+    <button class="btn secondary" data-tx="adjust" style="margin-top:8px">Corriger le solde</button>
+  </div>
+  <div class="card">
+    <h2>Historique des crédits et retraits</h2>
+    ${state.transactions.length ? state.transactions.map((t) => `<div class="tx">
+      <div><b>${TX_LABEL[t.type]}</b><div class="muted small">${new Date(t.createdAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })} · ${new Date(t.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</div></div>
+      <b class="${t.type === "withdraw" || t.amount < 0 ? "neg" : "pos"}">${t.type === "withdraw" ? "−" : t.amount > 0 ? "+" : "−"}${fmtEur(Math.abs(t.amount))}</b>
+      <button class="rm" data-tx-delete="${t.id}" aria-label="Supprimer">✕</button>
+    </div>`).join("") : `<p class="muted small">Aucun mouvement pour l'instant. Commence par créditer ton portefeuille.</p>`}
+  </div>`;
+}
+
+async function addTransaction(type) {
+  const amount = parseNum($("#tx-amount").value);
+  if (type === "adjust") {
+    if (!Number.isFinite(amount)) return toast("Indique le solde souhaité");
+    const delta = Math.round((amount - balance()) * 100) / 100;
+    if (!delta) return toast("Le solde est déjà à ce montant");
+    await store.addTransaction({ type, amount: delta });
+    return toast(`Solde corrigé à ${fmtEur(amount)}`);
+  }
+  if (!(amount > 0)) return toast("Indique un montant");
+  if (type === "withdraw" && amount > balance() && !confirm("Ce retrait dépasse ton solde. Continuer ?")) return;
+  await store.addTransaction({ type, amount });
+  toast(type === "deposit" ? `${fmtEur(amount)} crédités` : `${fmtEur(amount)} retirés`);
+}
+
+function renderAccount() { renderWallet(); renderProfile(); }
+
 // ================================================================ Navigation et événements
 
 function showView(v) {
+  state.view = v;
+  renderSlipBar();
   document.querySelectorAll(".view").forEach((el) => (el.hidden = el.id !== `view-${v}`));
   document.querySelectorAll(".tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
   window.scrollTo(0, 0);
-}
-
-function renderUser() {
-  const box = $("#user-box");
-  if (!isConfigured) { box.innerHTML = ""; return; }
-  box.innerHTML = state.user
-    ? `<button class="icon-btn" data-logout title="Se déconnecter (${esc(state.user.email || "")})">${state.user.photoURL ? `<img src="${esc(state.user.photoURL)}" alt="" referrerpolicy="no-referrer">` : "Déconnexion"}</button>`
-    : `<button class="login-btn" data-login>Connexion</button>`;
 }
 
 document.addEventListener("click", async (e) => {
@@ -578,6 +677,12 @@ document.addEventListener("click", async (e) => {
   } else if (t.id === "save-bet") saveBet();
   else if (t.id === "refresh-odds") refreshOdds();
   else if (d.betFilter) { state.betFilter = d.betFilter; renderBets(); }
+  else if (d.stake) {
+    state.slipStake = d.stake;
+    $("#slip-stake").value = d.stake;
+    $("#slip-stake").dispatchEvent(new Event("input", { bubbles: true }));
+  } else if (d.tx) addTransaction(d.tx).catch((err) => { console.error(err); toast("Erreur d'enregistrement"); });
+  else if (d.txDelete) { if (confirm("Supprimer ce mouvement ?")) store.removeTransaction(d.txDelete); }
   else if (d.delete) { if (confirm("Supprimer ce pari ?")) store.remove(d.delete); }
   else if (d.login !== undefined) store.login().catch((err) => toast(err.code === "auth/popup-closed-by-user" ? "Connexion annulée" : "Connexion impossible"));
   else if (d.logout !== undefined) { if (confirm("Se déconnecter ?")) store.logout(); }
@@ -589,6 +694,8 @@ document.addEventListener("input", (e) => {
   if (e.target.id === "slip-odds" || e.target.id === "slip-stake") {
     const g = parseNum($("#slip-odds").value) * parseNum($("#slip-stake").value);
     $("#slip-gain").textContent = Number.isFinite(g) ? fmtEur(g) : "–";
+    $("#stake-warn").hidden = !(parseNum($("#slip-stake").value) > balance());
+    renderSlipBar();
   }
 });
 
@@ -609,9 +716,10 @@ async function main() {
     state.user = u?.demo ? null : u;
     document.body.classList.remove("auth-pending");
     document.body.classList.toggle("locked", isConfigured && !state.user);
-    renderUser(); renderSlip(); renderBets();
+    renderAccount(); renderSlip(); renderBets();
   });
-  onBets((bets) => { state.bets = bets; persistScores(bets); renderBets(); if (state.data) renderMatches(); });
+  onBets((bets) => { state.bets = bets; persistScores(bets); renderBets(); renderAccount(); if (state.data) { renderMatches(); renderSlip(); } });
+  onTransactions((txs) => { state.transactions = txs; renderAccount(); if (state.data) renderSlip(); });
   const storeReady = initStore().catch((e) => {
     console.error(e);
     document.body.classList.replace("auth-pending", "locked");

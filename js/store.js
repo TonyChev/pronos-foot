@@ -1,30 +1,33 @@
-// Stockage des paris : Firestore (synchronisé entre appareils) ou, à défaut, en mémoire (mode démo).
+// Stockage des paris et des mouvements du portefeuille :
+// Firestore (synchronisé entre appareils) ou, à défaut, en mémoire (mode démo).
 import { firebaseConfig } from "./firebase-config.js";
 
 const FB = "https://www.gstatic.com/firebasejs/10.12.2";
+const COLLECTIONS = ["bets", "transactions"];
 
 export const isConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 
-let listeners = [];
-let userListeners = [];
+const listeners = Object.fromEntries(COLLECTIONS.map((c) => [c, []]));
+const userListeners = [];
 let api = null;
 
-function emit(bets) { listeners.forEach((fn) => fn(bets)); }
+function emit(name, docs) { listeners[name].forEach((fn) => fn(docs)); }
 function emitUser(user) { userListeners.forEach((fn) => fn(user)); }
 
-export function onBets(fn) { listeners.push(fn); }
+export function onBets(fn) { listeners.bets.push(fn); }
+export function onTransactions(fn) { listeners.transactions.push(fn); }
 export function onUser(fn) { userListeners.push(fn); }
 
 // ---------------------------------------------------------------- mode démo
 function memoryStore() {
-  let bets = [];
+  const data = Object.fromEntries(COLLECTIONS.map((c) => [c, []]));
   let n = 0;
-  const publish = () => emit([...bets].sort((a, b) => b.createdAt - a.createdAt));
-  setTimeout(() => { emitUser({ demo: true, displayName: "Mode démo" }); publish(); });
+  const publish = (name) => emit(name, [...data[name]].sort((a, b) => b.createdAt - a.createdAt));
+  setTimeout(() => { emitUser({ demo: true, displayName: "Mode démo" }); COLLECTIONS.forEach(publish); });
   return {
-    async add(bet) { bets.push({ ...bet, id: `demo-${++n}`, createdAt: Date.now() }); publish(); },
-    async update(id, patch) { bets = bets.map((b) => (b.id === id ? { ...b, ...patch } : b)); publish(); },
-    async remove(id) { bets = bets.filter((b) => b.id !== id); publish(); },
+    async add(name, doc) { data[name].push({ ...doc, id: `demo-${++n}`, createdAt: Date.now() }); publish(name); },
+    async update(name, id, patch) { data[name] = data[name].map((d) => (d.id === id ? { ...d, ...patch } : d)); publish(name); },
+    async remove(name, id) { data[name] = data[name].filter((d) => d.id !== id); publish(name); },
     async login() {},
     async logout() {},
   };
@@ -40,26 +43,28 @@ async function firebaseStore() {
   const app = initializeApp(firebaseConfig);
   const a = auth.getAuth(app);
   const db = fs.getFirestore(app);
-  let unsub = null;
+  let unsubs = [];
   let uid = null;
 
   auth.onAuthStateChanged(a, (user) => {
     uid = user?.uid ?? null;
     emitUser(user);
-    if (unsub) unsub();
-    unsub = null;
-    if (!user) { emit([]); return; }
-    const q = fs.query(fs.collection(db, "users", uid, "bets"), fs.orderBy("createdAt", "desc"));
-    unsub = fs.onSnapshot(q, (snap) => {
-      emit(snap.docs.map((d) => ({ id: d.id, ...d.data(), createdAt: d.data().createdAt?.toMillis?.() ?? Date.now() })));
-    }, (err) => console.error(err));
+    unsubs.forEach((u) => u());
+    unsubs = [];
+    if (!user) { COLLECTIONS.forEach((c) => emit(c, [])); return; }
+    for (const name of COLLECTIONS) {
+      const q = fs.query(fs.collection(db, "users", uid, name), fs.orderBy("createdAt", "desc"));
+      unsubs.push(fs.onSnapshot(q, (snap) => {
+        emit(name, snap.docs.map((d) => ({ id: d.id, ...d.data(), createdAt: d.data().createdAt?.toMillis?.() ?? Date.now() })));
+      }, (err) => console.error(err)));
+    }
   });
 
-  const col = () => fs.collection(db, "users", uid, "bets");
+  const col = (name) => fs.collection(db, "users", uid, name);
   return {
-    async add(bet) { await fs.addDoc(col(), { ...bet, createdAt: fs.serverTimestamp() }); },
-    async update(id, patch) { await fs.updateDoc(fs.doc(col(), id), patch); },
-    async remove(id) { await fs.deleteDoc(fs.doc(col(), id)); },
+    async add(name, doc) { await fs.addDoc(col(name), { ...doc, createdAt: fs.serverTimestamp() }); },
+    async update(name, id, patch) { await fs.updateDoc(fs.doc(col(name), id), patch); },
+    async remove(name, id) { await fs.deleteDoc(fs.doc(col(name), id)); },
     async login() { await auth.signInWithPopup(a, new auth.GoogleAuthProvider()); },
     async logout() { await auth.signOut(a); },
   };
@@ -71,9 +76,11 @@ export async function initStore() {
 }
 
 export const store = {
-  add: (b) => api.add(b),
-  update: (id, p) => api.update(id, p),
-  remove: (id) => api.remove(id),
+  add: (b) => api.add("bets", b),
+  update: (id, p) => api.update("bets", id, p),
+  remove: (id) => api.remove("bets", id),
+  addTransaction: (t) => api.add("transactions", t),
+  removeTransaction: (id) => api.remove("transactions", id),
   login: () => api.login(),
   logout: () => api.logout(),
 };

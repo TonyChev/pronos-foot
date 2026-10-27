@@ -78,8 +78,6 @@ body:not(.locked) .gate { display: none; }
   padding: 6px 16px; font-size: 13px;
 }
 .icon-btn:disabled { opacity: .5; }
-#user-box .icon-btn { background: transparent; padding: 0 4px; clip-path: none; }
-#user-box img { width: 30px; height: 30px; border-radius: 50%; vertical-align: middle; border: 2px solid var(--aqua); }
 
 main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 
@@ -303,4 +301,50 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 @media (max-width: 380px) {
   .cells, .axis { width: 50vw; }
   .dist-label span { font-size: 14px; }
+}
+
+/* ---------- Barre « Créer le combiné » ---------- */
+.slip-bar {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 9;
+  bottom: calc(66px + env(safe-area-inset-bottom)); width: min(656px, calc(100% - 24px));
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--aqua); color: var(--ink); padding: 10px 10px 10px 16px; border-radius: 4px;
+  box-shadow: 0 6px 20px rgba(11, 15, 16, .18);
+}
+.slip-bar div { display: flex; flex-direction: column; line-height: 1.2; }
+.slip-bar b { font-family: var(--display); font-size: 16px; text-transform: uppercase; }
+.slip-bar span { font-size: 13px; }
+.slip-bar .btn { width: auto; padding: 11px 22px; font-size: 14px; background: var(--ink); color: var(--aqua); }
+body:has(.slip-bar:not([hidden])) main { padding-bottom: 72px; }
+
+/* ---------- Bulletin : mises rapides ---------- */
+.quick-stakes { display: flex; gap: 4px; margin-top: 10px; }
+.quick-stakes .chip { flex: 1; background: var(--surface-2); font-family: var(--display); font-weight: 700; font-size: 14px; }
+
+/* ---------- Portefeuille (header) et profil ---------- */
+.wallet {
+  display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--ice);
+  font-family: var(--display); font-weight: 700; font-size: 15px; padding: 4px 6px;
+}
+.wallet svg { width: 20px; height: 20px; color: var(--aqua); }
+.wallet.neg { color: var(--pink); }
+.profile-head { display: flex; align-items: center; gap: 12px; }
+.profile-head img { width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--aqua); }
+.profile-head > div { flex: 1; min-width: 0; }
+.profile-head .muted { overflow: hidden; text-overflow: ellipsis; }
+.wallet-balance { font-family: var(--display); font-weight: 700; font-size: 38px; margin: -4px 0 12px; color: var(--good); }
+.wallet-balance.neg { color: var(--bad); }
+.btn.dark { background: var(--ink); color: var(--aqua); }
+.tx { display: grid; grid-template-columns: 1fr auto 28px; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); }
+.tx:first-of-type { border-top: 0; }
+.tx > b { font-family: var(--display); font-size: 16px; }
+.rm { border: 0; background: none; color: var(--muted); font-size: 16px; padding: 4px; }
+
+.icon-btn, .wallet { white-space: nowrap; }
+@media (max-width: 430px) {
+  .topbar { padding: 10px 12px; }
+  .brand { font-size: 17px; gap: 8px; }
+  .brand svg { width: 26px; height: 26px; }
+  #refresh-odds { padding: 6px 14px; font-size: 15px; }
+  #refresh-odds span { display: none; }
 }
