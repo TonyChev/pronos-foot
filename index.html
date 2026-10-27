@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,500;0,600;0,700;1,700&display=swap">
-  <link rel="stylesheet" href="css/style.css?v=202610271653">
+  <link rel="stylesheet" href="css/style.css?v=202610271714">
 </head>
 <body>
   <header class="topbar">
@@ -44,7 +44,6 @@
       <div id="matches"></div>
     </section>
 
-    <section id="view-slip" class="view" hidden></section>
     <section id="view-bets" class="view" hidden></section>
     <section id="view-profile" class="view" hidden></section>
   </main>
@@ -53,9 +52,16 @@
 
   <nav class="tabbar">
     <button data-view="matches" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7l4 3-1.5 5h-5L8 10z"/></svg>Matchs</button>
-    <button data-view="slip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>Bulletin <b id="slip-count" class="badge" hidden>0</b></button>
     <button data-view="bets"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16"/><path d="M7 16v-5M12 16V6M17 16v-8"/></svg>Mes paris</button>
   </nav>
+
+  <dialog id="slip-sheet" class="sheet" aria-labelledby="slip-title">
+    <div class="sheet-head">
+      <h2 id="slip-title">Mon bulletin</h2>
+      <button class="rm" data-close-slip aria-label="Fermer">✕</button>
+    </div>
+    <div id="view-slip"></div>
+  </dialog>
 
   <button class="help-fab" data-legend aria-label="Légende des couleurs" title="Légende des couleurs">?</button>
   <dialog id="legend" class="legend-modal" aria-labelledby="legend-title">
@@ -85,6 +91,6 @@
 
   <div id="toast" class="toast" hidden></div>
 
-  <script type="module" src="js/app.js?v=202610271653"></script>
+  <script type="module" src="js/app.js?v=202610271714"></script>
 </body>
 </html>

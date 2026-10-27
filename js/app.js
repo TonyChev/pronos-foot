@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610271653";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610271714";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -387,11 +387,10 @@ function suggestedOdds(sels) {
 function renderSlip() {
   const sels = slipSelections();
   const count = sels.reduce((n, s) => n + s.markets.length, 0);
-  $("#slip-count").hidden = !count;
-  $("#slip-count").textContent = count;
   renderSlipBar(sels, count);
   const view = $("#view-slip");
   if (!count) {
+    if ($("#slip-sheet").open) $("#slip-sheet").close();
     view.innerHTML = `<p class="empty">Ton bulletin est vide.<br>Dans l'onglet <b>Matchs</b>, touche une cote
       (les 2 marquent, +1,5 buts, +2,5 buts ou +1,5 buts d'une équipe) pour l'ajouter.</p>`;
     return;
@@ -440,7 +439,7 @@ function renderSlipBar(sels = slipSelections(), count = sels.reduce((n, s) => n 
   if (bar.hidden) return;
   const odds = state.slipOdds ?? suggestedOdds(sels);
   bar.innerHTML = `<div><b>${count} sélection${count > 1 ? "s" : ""}</b><span>cote ${esc(String(odds).replace(".", ","))}</span></div>
-    <button class="btn" data-view="slip">${count > 1 ? "Créer le combiné" : "Créer le pari"}</button>`;
+    <button class="btn" data-open-slip>${count > 1 ? "Créer le combiné" : "Créer le pari"}</button>`;
 }
 
 async function saveBet() {
@@ -468,7 +467,6 @@ async function saveBet() {
     renderSlip();
     renderMatches();
     toast("Pari enregistré ✔");
-    showView("bets");
   } catch (e) {
     console.error(e);
     toast(`Erreur d'enregistrement (${e.code || e.message})`);
@@ -712,13 +710,15 @@ document.addEventListener("click", async (e) => {
     state.slip.clear();
     c.legs.forEach((l) => state.slip.set(l.m.id, new Set([l.k])));
     state.slipOdds = null;
-    renderSlip(); renderMatches(); showView("slip");
+    renderSlip(); renderMatches(); $("#slip-sheet").showModal();
     toast("Combiné ajouté au bulletin");
   } else if (t.id === "clear-slip") {
     state.slip.clear(); state.slipOdds = null; renderSlip(); renderMatches();
   } else if (t.id === "save-bet") saveBet();
   else if (t.id === "refresh-odds") refreshOdds();
   else if (d.betFilter) { state.betFilter = d.betFilter; renderBets(); }
+  else if (d.openSlip !== undefined) $("#slip-sheet").showModal();
+  else if (d.closeSlip !== undefined) $("#slip-sheet").close();
   else if (d.legend !== undefined) $("#legend").showModal();
   else if (d.closeLegend !== undefined) $("#legend").close();
   else if (d.tx) addTransaction(d.tx).catch((err) => { console.error(err); toast(`Erreur d'enregistrement (${err.code || err.message})`); });
@@ -729,7 +729,7 @@ document.addEventListener("click", async (e) => {
 });
 
 // Un clic sur le fond assombri ferme la légende
-document.addEventListener("click", (e) => { if (e.target.id === "legend") e.target.close(); });
+document.addEventListener("click", (e) => { if (e.target.id === "legend" || e.target.id === "slip-sheet") e.target.close(); });
 
 document.addEventListener("input", (e) => {
   if (e.target.id === "slip-odds") state.slipOdds = e.target.value;

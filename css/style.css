@@ -376,3 +376,16 @@ body.locked .help-fab, body.auth-pending .help-fab { display: none; }
 .sw.scored { background: var(--scored-dark); }
 .sw.conceded { background: var(--conceded-dark); }
 .sw.zero { background: var(--zero); }
+
+/* ---------- Bulletin : panneau qui glisse depuis le bas ---------- */
+.sheet {
+  width: min(680px, 100%); max-width: 100%; max-height: 88vh; margin: auto auto 0; padding: 14px 12px calc(14px + env(safe-area-inset-bottom));
+  border: 0; border-radius: 12px 12px 0 0; background: var(--bg); color: var(--text);
+  border-top: 4px solid var(--aqua);
+}
+.sheet[open] { animation: sheet-up .22s ease-out; }
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+.sheet::backdrop { background: rgba(11, 15, 16, .6); }
+.sheet-head { display: flex; justify-content: space-between; align-items: center; margin: 0 4px 10px; }
+.sheet-head h2 { margin: 0; font-size: 18px; text-transform: uppercase; font-style: italic; }
+.sheet .card:last-child { margin-bottom: 0; }
