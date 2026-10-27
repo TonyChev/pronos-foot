@@ -1,11 +1,10 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610271602";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610271617";
 
 const MARKETS = { btts: "Les 2 équipes marquent", o25: "Plus de 2,5 buts" };
 const SHORT = { btts: "Les 2 marquent", o25: "+2,5 buts" };
 const KAMBI = "https://eu-offering-api.kambicdn.com/offering/v2018/ub";
 const STATUS_LABEL = { won: "Gagné", lost: "Perdu", pending: "En cours", void: "Remboursé" };
 const TX_LABEL = { deposit: "Crédit", withdraw: "Retrait", adjust: "Correction du solde" };
-const QUICK_STAKES = [2, 5, 10, 20];
 
 const state = {
   data: null,
@@ -382,7 +381,6 @@ function renderSlip() {
         <input id="slip-stake" inputmode="decimal" placeholder="ex. 5" value="${esc(state.slipStake)}">
       </label>
     </div>
-    <div class="quick-stakes">${QUICK_STAKES.map((v) => `<button class="chip" data-stake="${v}">${v} €</button>`).join("")}</div>
     <p class="hint">Solde disponible : <b class="${bal < 0 ? "neg" : ""}">${fmtEur(bal)}</b>
       <span id="stake-warn" class="neg" ${stake > bal ? "" : "hidden"}> · mise supérieure à ton solde</span></p>
     <p class="hint">Cote calculée : ${String(suggested).replace(".", ",")}. Corrige-la avec la cote exacte affichée par Unibet${sameMatch ? " (2 paris sur un même match = « Bet Builder » : la cote réelle est différente du produit)" : ""}.</p>
@@ -677,11 +675,7 @@ document.addEventListener("click", async (e) => {
   } else if (t.id === "save-bet") saveBet();
   else if (t.id === "refresh-odds") refreshOdds();
   else if (d.betFilter) { state.betFilter = d.betFilter; renderBets(); }
-  else if (d.stake) {
-    state.slipStake = d.stake;
-    $("#slip-stake").value = d.stake;
-    $("#slip-stake").dispatchEvent(new Event("input", { bubbles: true }));
-  } else if (d.tx) addTransaction(d.tx).catch((err) => { console.error(err); toast(`Erreur d'enregistrement (${err.code || err.message})`); });
+  else if (d.tx) addTransaction(d.tx).catch((err) => { console.error(err); toast(`Erreur d'enregistrement (${err.code || err.message})`); });
   else if (d.txDelete) { if (confirm("Supprimer ce mouvement ?")) store.removeTransaction(d.txDelete); }
   else if (d.delete) { if (confirm("Supprimer ce pari ?")) store.remove(d.delete); }
   else if (d.login !== undefined) store.login().catch((err) => toast(err.code === "auth/popup-closed-by-user" ? "Connexion annulée" : "Connexion impossible"));

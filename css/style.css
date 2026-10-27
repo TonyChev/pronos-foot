@@ -317,10 +317,6 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 .slip-bar .btn { width: auto; padding: 11px 22px; font-size: 14px; background: var(--ink); color: var(--aqua); }
 body:has(.slip-bar:not([hidden])) main { padding-bottom: 72px; }
 
-/* ---------- Bulletin : mises rapides ---------- */
-.quick-stakes { display: flex; gap: 4px; margin-top: 10px; }
-.quick-stakes .chip { flex: 1; background: var(--surface-2); font-family: var(--display); font-weight: 700; font-size: 14px; }
-
 /* ---------- Portefeuille (header) et profil ---------- */
 .wallet {
   display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--ice);
