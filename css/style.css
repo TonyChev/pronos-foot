@@ -1,4 +1,4 @@
-/* Palette : blanc glacier, turquoise, rose vif, noir encre. Formes biseautées (parallélogrammes). */
+/* Thème clair uniquement. Palette : blanc glacier, turquoise, rose vif, noir encre. Formes biseautées (parallélogrammes). */
 :root {
   --ink: #0b0f10;
   --aqua: #55ede2;
@@ -26,29 +26,6 @@
   --cut: 9px;                /* biseau des boutons et puces */
   --display: "Chakra Petch", system-ui, sans-serif;
   color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0b0f10;
-    --surface: #141a1c;
-    --surface-2: #1d2528;
-    --text: #eef4f6;
-    --muted: #8d9ca2;
-    --border: #253033;
-    --good: #55ede2;
-    --bad: #ff4f86;
-    --zero: #313c40;
-    --cell-text: #0b0f10;
-    --hero: #141a1c;
-    --shadow: none;
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #0b0f10; --surface: #141a1c; --surface-2: #1d2528; --text: #eef4f6; --muted: #8d9ca2;
-  --border: #253033; --good: #55ede2; --bad: #ff4f86; --zero: #313c40; --hero: #141a1c; --shadow: none;
-  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -129,12 +106,6 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 }
 .comp-filter::-webkit-scrollbar { display: none; }
 .chip { white-space: nowrap; padding: 6px 16px; font-size: 12.5px; text-transform: none; font-weight: 600; }
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .chip-day.active,
-  :root:not([data-theme="light"]) .chip.active,
-  :root:not([data-theme="light"]) .seg button.active { background: var(--aqua); color: var(--ink); }
-}
 
 /* ---------- Liste des matchs ---------- */
 .match {
