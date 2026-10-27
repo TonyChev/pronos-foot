@@ -70,3 +70,6 @@ Dans `scripts/update.py`, ajoute une ligne à `COMPETITIONS` :
 python3 scripts/update.py      # rafraîchit data/
 python3 -m http.server 8765    # puis ouvrir http://localhost:8765
 ```
+
+## Publier une nouvelle version
+Les fichiers sont appelés avec un numéro de version (`?v=...` dans `index.html`, `js/app.js` et `js/store.js`). Change ce numéro à chaque modification du code, sinon les téléphones peuvent garder l'ancienne version en cache.

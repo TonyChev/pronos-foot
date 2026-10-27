@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610271602";
 
 const MARKETS = { btts: "Les 2 équipes marquent", o25: "Plus de 2,5 buts" };
 const SHORT = { btts: "Les 2 marquent", o25: "+2,5 buts" };
@@ -431,7 +431,7 @@ async function saveBet() {
     showView("bets");
   } catch (e) {
     console.error(e);
-    toast("Erreur d'enregistrement");
+    toast(`Erreur d'enregistrement (${e.code || e.message})`);
     btn.disabled = false;
   }
 }
@@ -681,7 +681,7 @@ document.addEventListener("click", async (e) => {
     state.slipStake = d.stake;
     $("#slip-stake").value = d.stake;
     $("#slip-stake").dispatchEvent(new Event("input", { bubbles: true }));
-  } else if (d.tx) addTransaction(d.tx).catch((err) => { console.error(err); toast("Erreur d'enregistrement"); });
+  } else if (d.tx) addTransaction(d.tx).catch((err) => { console.error(err); toast(`Erreur d'enregistrement (${err.code || err.message})`); });
   else if (d.txDelete) { if (confirm("Supprimer ce mouvement ?")) store.removeTransaction(d.txDelete); }
   else if (d.delete) { if (confirm("Supprimer ce pari ?")) store.remove(d.delete); }
   else if (d.login !== undefined) store.login().catch((err) => toast(err.code === "auth/popup-closed-by-user" ? "Connexion annulée" : "Connexion impossible"));
