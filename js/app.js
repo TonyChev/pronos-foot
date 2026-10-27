@@ -603,9 +603,20 @@ document.addEventListener("change", (e) => {
 // ================================================================ Démarrage
 
 async function main() {
-  onUser((u) => { state.user = u?.demo ? null : u; renderUser(); renderSlip(); renderBets(); });
+  // Avec Firebase configuré, toute l'app est réservée aux utilisateurs connectés
+  if (isConfigured) document.body.classList.add("auth-pending");
+  onUser((u) => {
+    state.user = u?.demo ? null : u;
+    document.body.classList.remove("auth-pending");
+    document.body.classList.toggle("locked", isConfigured && !state.user);
+    renderUser(); renderSlip(); renderBets();
+  });
   onBets((bets) => { state.bets = bets; persistScores(bets); renderBets(); if (state.data) renderMatches(); });
-  const storeReady = initStore().catch((e) => { console.error(e); toast("Synchronisation indisponible"); });
+  const storeReady = initStore().catch((e) => {
+    console.error(e);
+    document.body.classList.replace("auth-pending", "locked");
+    toast("Connexion indisponible, réessaie dans un instant");
+  });
 
   try {
     const r = await fetch(`data/matches.json?t=${Date.now()}`);
