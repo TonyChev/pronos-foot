@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610281526";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610281601";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -279,20 +279,19 @@ function verdictHTML(m) {
 
 const scorerOf = (m, k) => [...(m.scorers?.h || []), ...(m.scorers?.a || [])].find((p) => p.id === scorerId(k));
 
-// Chances qu'un joueur marque pendant le temps réglementaire (loi de Poisson) :
-// ses buts attendus par 90 min (buts réels + xG, saison précédente en appoint, calculés par le script de collecte)
-// × son temps de jeu habituel × la probabilité qu'il soit titulaire (1 avec la compo officielle),
-// corrigés par les buts attendus de son équipe dans CE match (attaque croisée avec la défense adverse)
-// rapportés à sa moyenne de la saison.
-// Le lissage vers la moyenne du poste tire les meilleurs buteurs vers le bas : sans correction, les 5 joueurs
-// retenus ne pèsent que ~60 % des buts de leur équipe, contre ~70 % en réalité, d'où un recalage de 1,2.
-const SCORER_CALIBRATION = 1.2;
+// Chances qu'un joueur marque pendant le temps réglementaire (loi de Poisson), en le supposant titulaire :
+// ses buts attendus par 90 min cette saison (buts réels + xG, calculés par le script de collecte)
+// × son temps de jeu habituel, corrigés par les buts attendus de son équipe dans CE match
+// (attaque croisée avec la défense adverse) rapportés à sa moyenne de la saison.
+// Le lissage vers la moyenne du poste tire les meilleurs buteurs vers le bas : recalage de 1,1.
+const SCORER_CALIBRATION = 1.1;
+const SCORER_MIN = 0.2;   // en dessous de 20 % de chances, le joueur n'est pas proposé
 function scorerProb(m, side, p) {
   const s = team(side === "h" ? m.h : m.a).stats.all;
   const avg = s.n ? s.gf / s.n : 0;
   const est = estimate(m);
   const adj = est && avg ? Math.min(1.6, Math.max(0.6, (side === "h" ? est.lh : est.la) / avg)) : 1;
-  return 1 - Math.exp(-p.r * (p.min / 90) * p.st * adj * SCORER_CALIBRATION);
+  return 1 - Math.exp(-p.r * (p.min / 90) * adj * SCORER_CALIBRATION);
 }
 
 const LINEUP_LABEL = {
@@ -306,21 +305,23 @@ function scorersHTML(m, picked) {
   const sc = m.scorers;
   if (!sc || !(sc.h.length || sc.a.length)) return "";
   const side = (key, teamId) => {
+    // 3 joueurs maximum, ayant déjà marqué cette saison et avec au moins 20 % de chances
     const players = sc[key].map((p) => ({ ...p, prob: scorerProb(m, key, p) }))
+      .filter((p) => p.g > 0 && p.prob >= SCORER_MIN)
       .sort((x, y) => y.prob - x.prob).slice(0, 3);
-    if (!players.length) return "";
     const out = sc[`${key}Out`] || [];
+    const goalsLine = (p) => `${p.g} but${p.g > 1 ? "s" : ""}${p.mp ? ` en ${p.mp} match${p.mp > 1 ? "s" : ""}` : ""}`;
     return `<div class="sc-team"><img class="logo" src="${teamLogo(teamId)}" alt=""><span>${esc(team(teamId).name)}</span></div>
+      ${players.length ? "" : `<p class="sc-out">Aucun joueur à 20 % de chances ou plus.</p>`}
       <div class="odds-row sc">${players.map((p) => {
         const k = `sc:${p.id}`;
         const pr = Math.round(p.prob * 100);
         // ★ : la cote Unibet paie nettement plus que ce que mes chances justifient
         // (pas sur les outsiders, où l'estimation est trop incertaine)
         const value = p.o && p.prob >= 0.2 && p.prob * p.o >= 1.2;
-        const title = `${p.n} : ${p.g} but${p.g > 1 ? "s" : ""}${p.xg != null ? `, xG ${String(p.xg).replace(".", ",")}` : ""} cette saison`
-          + ` — mes chances : ${pr}%${p.o ? ` — Unibet : ${Math.round(100 / p.o)}%` : " — pas de cote Unibet"}`;
+        const title = `${p.n} : ${goalsLine(p)} cette saison — mes chances : ${pr}%${p.o ? ` — Unibet : ${Math.round(100 / p.o)}%` : " — pas de cote Unibet"}`;
         return `<button class="odd sc-row ${picked.has(k) ? "picked" : ""}" data-pick="${k}" data-id="${m.id}" ${p.o ? "" : "disabled"} title="${esc(title)}">
-          <span class="odd-label">${esc(p.n)}<small>${p.g} but${p.g > 1 ? "s" : ""}${p.xg != null ? ` · xG ${String(p.xg).replace(".", ",")}` : ""}</small></span>
+          <span class="odd-label">${esc(p.n)}<small>${goalsLine(p)}</small></span>
           ${pctSpan(pr, "pct")}<b>${value ? `<i class="value">★</i>` : ""}${fmtOdds(p.o)}</b></button>`;
       }).join("")}</div>
       ${out.length ? `<p class="sc-out">Absents : ${out.map((o) => `${esc(o.n)} (${WHY[o.why] || "absent"}, ${o.g} but${o.g > 1 ? "s" : ""})`).join(" · ")}</p>` : ""}`;
@@ -328,9 +329,10 @@ function scorersHTML(m, picked) {
   return `<div class="scorers">
     <h3>Buteurs <span class="muted small">· ${esc(LINEUP_LABEL[sc.lineup] || LINEUP_LABEL.null)}</span></h3>
     ${side("h", m.h)}${side("a", m.a)}
-    <p class="dist-note">% = mes chances qu'il marque dans le temps réglementaire : buts et xG par 90 min cette saison,
-      temps de jeu habituel, compo, et défense adverse. <b>★</b> = cote Unibet plus généreuse que mes chances.
-      Vérifie la compo officielle, publiée environ 1 h avant le match.</p>
+    <p class="dist-note">% = mes chances qu'il marque dans le temps réglementaire s'il est titulaire, d'après cette saison :
+      ses buts et ses occasions par 90 min, son temps de jeu habituel et la défense adverse.
+      Seuls les joueurs qui ont déjà marqué et ont au moins 20 % de chances sont proposés.
+      <b>★</b> = cote Unibet plus généreuse que mes chances.</p>
   </div>`;
 }
 

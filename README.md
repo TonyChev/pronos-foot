@@ -77,7 +77,8 @@ Les fichiers sont appelés avec un numéro de version (`?v=...` dans `index.html
 ## Buteurs
 
 Pour chaque match des prochaines 48 h, le script récupère sur FotMob la compo probable (puis officielle),
-les absents (blessés, suspendus) et, pour chaque joueur, ses buts, xG et minutes de la saison en cours
-et de la précédente. L'app en déduit ses chances de marquer, ajustées à la défense adverse, et les compare
-à la cote Unibet « buteur » (★ = cote plus généreuse que l'estimation). Un pari buteur est gagné si le joueur
+les absents (blessés, suspendus) et, pour chaque joueur, ses buts, xG et minutes de la saison en cours.
+L'app en déduit ses chances de marquer s'il est titulaire, ajustées à la défense adverse, et les compare
+à la cote Unibet « buteur » (★ = cote plus généreuse que l'estimation). Seuls 3 joueurs par équipe au plus
+sont proposés : ceux qui ont déjà marqué et ont au moins 20 % de chances. Un pari buteur est gagné si le joueur
 marque (hors contre son camp) et remboursé s'il n'entre pas en jeu.

@@ -17,7 +17,6 @@ import re
 import sys
 import time
 import unicodedata
-import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -160,8 +159,6 @@ def collect_fotmob(now):
         # Classements joueurs de la saison (buts, xG…) : servent au % de chances des buteurs
         comp["statUrls"] = {s.get("name"): s.get("fetchAllUrl")
                             for s in (d.get("stats") or {}).get("players") or [] if s.get("fetchAllUrl")}
-        seasons = d.get("allAvailableSeasons") or []
-        comp["prevSeason"] = seasons[1] if len(seasons) > 1 and seasons[0] == comp["season"] else None
         matches = (d.get("fixtures") or {}).get("allMatches") or []
         nb_up = 0
         for m in matches:
@@ -259,33 +256,14 @@ def team_stats(cache, team_ids):
 # utilisé pour lisser les joueurs qui ont encore peu joué.
 POS_PRIOR = {0: 0.0, 1: 0.04, 2: 0.12, 3: 0.35}
 PRIOR_90 = 1.5        # poids du a priori : l'équivalent d'un match et demi
-PREV_WEIGHT = 0.5     # la saison précédente compte moitié moins que la saison en cours
-# Sans compo, on retient les joueurs les plus utilisés de la saison : des titulaires habituels
-START_PROB = {"confirmed": 1.0, "predicted": 0.9, None: 0.85}
-
-
-def prev_season_urls(comp):
-    if not comp.get("prevSeason"):
-        return {}
-    d = get_json(f"{FOTMOB}/leagues?id={comp['id']}&season={urllib.parse.quote(comp['prevSeason'])}")
-    return {s.get("name"): s.get("fetchAllUrl") for s in ((d or {}).get("stats") or {}).get("players") or [] if s.get("fetchAllUrl")}
 
 
 def player_stats():
-    """Buts, xG et minutes de chaque joueur dans son championnat (une liste par compétition suivie),
-    pour la saison en cours et, en appoint, la saison précédente."""
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        prev_urls = list(ex.map(prev_season_urls, COMPETITIONS))
-    cur = read_player_lists([(c, c.get("statUrls") or {}) for c in COMPETITIONS])
-    prev = read_player_lists(list(zip(COMPETITIONS, prev_urls)))
-    for pid, p in cur.items():
-        if pid in prev:
-            p["prev"] = {k: prev[pid].get(k) for k in ("g", "xg", "min")}
-    # Joueurs sans minute cette saison (blessés longtemps, recrues) : la saison précédente seule
-    for pid, p in prev.items():
-        cur.setdefault(pid, {"team": None, "name": p["name"], "min": 0, "mp": 0, "g": 0, "prev": {k: p.get(k) for k in ("g", "xg", "min")}})
-    log(f"Stats joueurs : {len(cur)} joueurs (saison précédente : {len(prev)})")
-    return cur
+    """Buts, xG et minutes de chaque joueur dans son championnat, saison en cours uniquement
+    (une liste par compétition suivie)."""
+    out = read_player_lists([(c, c.get("statUrls") or {}) for c in COMPETITIONS])
+    log(f"Stats joueurs : {len(out)} joueurs")
+    return out
 
 
 def read_player_lists(comps_urls):
@@ -313,18 +291,10 @@ def read_player_lists(comps_urls):
     return out
 
 
-def per90(pos, goals, xg, minutes, prev=None):
-    """Buts attendus par 90 min : moitié buts réels, moitié xG (plus stable), complétés par la saison
-    précédente (comptée moitié) et lissés vers la moyenne du poste."""
+def per90(pos, goals, xg, minutes):
+    """Buts attendus par 90 min : moitié buts réels, moitié xG (plus stable), lissés vers la moyenne du poste."""
     s = goals if xg is None else (goals + xg) / 2
-    n = minutes / 90
-    if prev and prev.get("min"):
-        ps = prev.get("g") or 0
-        if prev.get("xg") is not None:
-            ps = (ps + prev["xg"]) / 2
-        s += ps * PREV_WEIGHT
-        n += prev["min"] / 90 * PREV_WEIGHT
-    return (s + POS_PRIOR.get(pos, 0.12) * PRIOR_90) / (n + PRIOR_90)
+    return (s + POS_PRIOR.get(pos, 0.12) * PRIOR_90) / (minutes / 90 + PRIOR_90)
 
 
 def build_scorers(details, side, team_id, pstats, team_n):
@@ -351,23 +321,24 @@ def build_scorers(details, side, team_id, pstats, team_n):
         if pos == 0 or p.get("positionId") == 11:
             continue  # gardien
         s = pstats.get(p["id"])
-        prev = (s or {}).get("prev")
-        if s and (s.get("min") or prev):
-            goals, xg, minutes = s.get("g", 0), s.get("xg"), s.get("min") or 0
-            avg_min = minutes / s["mp"] if s.get("mp") else 75
+        if s and s.get("min"):
+            goals, xg, minutes, mp = s.get("g", 0), s.get("xg"), s["min"], s.get("mp") or None
+            avg_min = minutes / mp if mp else 75
         else:
             # Hors des championnats suivis : buts de la saison donnés par la compo, minutes estimées
             goals = (p.get("performance") or {}).get("seasonGoals") or 0
-            xg, minutes, avg_min = None, 75 * max(1, team_n), 75
+            xg, minutes, avg_min, mp = None, 75 * max(1, team_n), 75, None
         if pos is None:
             pos = 3 if goals / max(1, minutes / 90) > 0.25 else 2
         players.append({
             "id": p["id"], "n": p.get("name"), "pos": pos,
-            "r": round(per90(pos, goals, xg, minutes, prev), 3),
+            "r": round(per90(pos, goals, xg, minutes), 3),
             "min": round(min(88, max(60, avg_min))),
-            "st": START_PROB[kind], "g": goals, "xg": None if xg is None else round(xg, 1),
+            "g": goals, "mp": mp,
         })
     players.sort(key=lambda x: -x["r"] * x["min"])
+    # Uniquement des joueurs qui ont déjà marqué cette saison
+    players = [x for x in players if x["g"] > 0]
     return kind, players[:5], [o for o in out if o["g"]][:5]
 
 
