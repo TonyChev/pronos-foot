@@ -142,10 +142,10 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 }
 .kickoff { font-family: var(--display); font-weight: 700; font-size: 15px; text-align: center; line-height: 1.2; }
 .kickoff.live { color: var(--bad); }
-/* Les deux équipes sur une seule ligne : domicile à gauche, score au centre, extérieur à droite */
-.teams { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; min-width: 0; }
+/* Les deux équipes sur une seule ligne, alignées à gauche contre l'heure du match */
+.teams { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .team { display: flex; align-items: center; gap: 7px; min-width: 0; font-weight: 600; }
-.team.home { justify-content: flex-end; text-align: right; }
+.score { flex: none; }
 .team .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .teams img, .logo { width: 22px; height: 22px; object-fit: contain; flex: none; }
 .score { font-family: var(--display); font-size: 18px; font-weight: 700; white-space: nowrap; }
