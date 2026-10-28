@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610281024";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610281028";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -528,6 +528,11 @@ function renderBets() {
   const profit = returned - staked;
   const pending = bets.filter((b) => b.status === "pending");
   const sign = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "");
+  // Évolution du portefeuille : résultat des paris réglés rapporté à l'argent que tu y as mis
+  // (crédits − retraits ± corrections). Ex. 1,10 € → 1,22 € = +10,9 %.
+  const w = wallet();
+  const capital = w.deposits - w.withdrawals + w.adjust;
+  const growth = capital > 0 ? (w.result / capital) * 100 : null;
 
   const list = bets.filter((b) => state.betFilter === "all" || (state.betFilter === "pending" ? b.status === "pending" : b.status !== "pending"));
 
@@ -539,8 +544,9 @@ function renderBets() {
       <div class="stat"><b>${pct(won.length, won.length + lost.length)}%</b><span>réussite</span></div>
       <div class="stat"><b class="${sign(profit)}">${profit > 0 ? "+" : ""}${fmtEur(profit)}</b><span>bénéfice</span></div>
       <div class="stat"><b>${fmtEur(staked)}</b><span>misé (réglés)</span></div>
-      <div class="stat"><b class="${sign(profit)}">${staked ? `${profit > 0 ? "+" : ""}${Math.round((profit / staked) * 100)}%` : "–"}</b><span>ROI</span></div>
-      <div class="stat"><b>${pending.length}</b><span>en cours · ${fmtEur(pending.reduce((s, b) => s + b.stake, 0))}</span></div>
+      <div class="stat"><b class="${sign(profit)}">${staked ? `${profit > 0 ? "+" : ""}${Math.round((profit / staked) * 100)}%` : "–"}</b><span>ROI (sur les mises)</span></div>
+      <div class="stat"><b class="${sign(growth ?? 0)}">${growth === null ? "–" : `${growth > 0 ? "+" : ""}${growth.toFixed(1).replace(".", ",")}%`}</b><span>évolution du portefeuille</span></div>
+      <div class="stat wide"><b>${pending.length}</b><span>en cours · ${fmtEur(pending.reduce((s, b) => s + b.stake, 0))}</span></div>
     </div>
   </div>
   <div class="days">
