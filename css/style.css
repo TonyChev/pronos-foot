@@ -137,14 +137,19 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 .odd.picked .good, .odd.picked .bad { color: var(--ink); }
 
 .match-head {
-  display: grid; grid-template-columns: 52px 1fr auto 22px; align-items: center; gap: 8px;
+  display: grid; grid-template-columns: 46px 1fr 18px; align-items: center; gap: 6px;
   width: 100%; padding: 8px 12px 10px; border: 0; background: none; text-align: left;
 }
 .kickoff { font-family: var(--display); font-weight: 700; font-size: 15px; text-align: center; line-height: 1.2; }
 .kickoff.live { color: var(--bad); }
-.teams div { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-weight: 500; }
+/* Les deux équipes sur une seule ligne : domicile à gauche, score au centre, extérieur à droite */
+.teams { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; min-width: 0; }
+.team { display: flex; align-items: center; gap: 7px; min-width: 0; font-weight: 600; }
+.team.home { justify-content: flex-end; text-align: right; }
+.team .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .teams img, .logo { width: 22px; height: 22px; object-fit: contain; flex: none; }
-.score { font-family: var(--display); font-size: 17px; font-weight: 700; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.score { font-family: var(--display); font-size: 18px; font-weight: 700; white-space: nowrap; }
+.score i { font-style: normal; color: var(--muted); margin: 0 3px; }
 .chev { color: var(--muted); transition: transform .2s; }
 .match.open .chev { transform: rotate(180deg); }
 

@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610271721";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610281020";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -164,10 +164,10 @@ function matchCard(m) {
     <button class="match-head" data-toggle="${m.id}" aria-expanded="${open}">
       ${ko}
       <div class="teams">
-        <div><img src="${teamLogo(m.h)}" alt="" loading="lazy">${esc(h.name)}</div>
-        <div><img src="${teamLogo(m.a)}" alt="" loading="lazy">${esc(a.name)}</div>
+        <span class="team home"><span class="name">${esc(h.name)}</span><img src="${teamLogo(m.h)}" alt="" loading="lazy"></span>
+        <span class="score">${m.score ? `${esc(hs)}<i>-</i>${esc(as)}` : "<i>–</i>"}</span>
+        <span class="team away"><img src="${teamLogo(m.a)}" alt="" loading="lazy"><span class="name">${esc(a.name)}</span></span>
       </div>
-      <div class="score">${m.score ? `<span>${esc(hs)}</span><span>${esc(as)}</span>` : ""}</div>
       <span class="chev">▾</span>
     </button>
     <div class="odds-row">${MATCH_MARKETS.map(oddBtn).join("")}</div>
