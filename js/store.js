@@ -1,6 +1,6 @@
 // Stockage des paris et des mouvements du portefeuille :
 // Firestore (synchronisé entre appareils) ou, à défaut, en mémoire (mode démo).
-import { firebaseConfig } from "./firebase-config.js?v=202610281611";
+import { firebaseConfig } from "./firebase-config.js?v=202610281615";
 
 const FB = "https://www.gstatic.com/firebasejs/10.12.2";
 const COLLECTIONS = ["bets", "transactions"];
