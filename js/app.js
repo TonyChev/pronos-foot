@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610281029";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610281526";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -6,7 +6,11 @@ const TEAM_MARKETS = ["h15", "a15"];
 const ALL_MARKETS = [...MATCH_MARKETS, ...TEAM_MARKETS];
 const MARKETS = { btts: "Les 2 équipes marquent", o15: "Plus de 1,5 buts", o25: "Plus de 2,5 buts" };
 const SHORT = { btts: "BTTS", o15: "+1,5 buts", o25: "+2,5 buts" };
-const marketLabel = (k, home, away) => MARKETS[k] ?? `${k === "h15" ? home : away} : plus de 1,5 buts`;
+// Paris buteur : clé « sc:<id du joueur FotMob> », le nom du joueur est gardé dans la sélection
+const isScorer = (k) => String(k).startsWith("sc:");
+const scorerId = (k) => Number(String(k).slice(3));
+const marketLabel = (k, home, away, name) => (isScorer(k) ? `${name || "Joueur"} buteur`
+  : MARKETS[k] ?? `${k === "h15" ? home : away} : plus de 1,5 buts`);
 const shortLabel = (k, home, away) => SHORT[k] ?? `${k === "h15" ? home : away} +1,5`;
 const KAMBI = "https://eu-offering-api.kambicdn.com/offering/v2018/ub";
 const STATUS_LABEL = { won: "Gagné", lost: "Perdu", pending: "En cours", void: "Remboursé" };
@@ -173,6 +177,7 @@ function matchCard(m) {
     <div class="odds-row">${MATCH_MARKETS.map(oddBtn).join("")}</div>
     <div class="odds-row team">${TEAM_MARKETS.map(oddBtn).join("")}</div>
     ${locked ? "" : verdictHTML(m)}
+    ${open && !locked ? scorersHTML(m, picked) : ""}
     ${open ? distHTML(m) : ""}
   </article>`;
 }
@@ -270,6 +275,65 @@ function verdictHTML(m) {
   </div>`;
 }
 
+// ================================================================ Buteurs
+
+const scorerOf = (m, k) => [...(m.scorers?.h || []), ...(m.scorers?.a || [])].find((p) => p.id === scorerId(k));
+
+// Chances qu'un joueur marque pendant le temps réglementaire (loi de Poisson) :
+// ses buts attendus par 90 min (buts réels + xG, saison précédente en appoint, calculés par le script de collecte)
+// × son temps de jeu habituel × la probabilité qu'il soit titulaire (1 avec la compo officielle),
+// corrigés par les buts attendus de son équipe dans CE match (attaque croisée avec la défense adverse)
+// rapportés à sa moyenne de la saison.
+// Le lissage vers la moyenne du poste tire les meilleurs buteurs vers le bas : sans correction, les 5 joueurs
+// retenus ne pèsent que ~60 % des buts de leur équipe, contre ~70 % en réalité, d'où un recalage de 1,2.
+const SCORER_CALIBRATION = 1.2;
+function scorerProb(m, side, p) {
+  const s = team(side === "h" ? m.h : m.a).stats.all;
+  const avg = s.n ? s.gf / s.n : 0;
+  const est = estimate(m);
+  const adj = est && avg ? Math.min(1.6, Math.max(0.6, (side === "h" ? est.lh : est.la) / avg)) : 1;
+  return 1 - Math.exp(-p.r * (p.min / 90) * p.st * adj * SCORER_CALIBRATION);
+}
+
+const LINEUP_LABEL = {
+  confirmed: "Compo officielle",
+  predicted: "Compo probable",
+  null: "Compo pas encore connue : joueurs les plus utilisés",
+};
+const WHY = { injury: "blessé", suspension: "suspendu", international: "en sélection" };
+
+function scorersHTML(m, picked) {
+  const sc = m.scorers;
+  if (!sc || !(sc.h.length || sc.a.length)) return "";
+  const side = (key, teamId) => {
+    const players = sc[key].map((p) => ({ ...p, prob: scorerProb(m, key, p) }))
+      .sort((x, y) => y.prob - x.prob).slice(0, 3);
+    if (!players.length) return "";
+    const out = sc[`${key}Out`] || [];
+    return `<div class="sc-team"><img class="logo" src="${teamLogo(teamId)}" alt=""><span>${esc(team(teamId).name)}</span></div>
+      <div class="odds-row sc">${players.map((p) => {
+        const k = `sc:${p.id}`;
+        const pr = Math.round(p.prob * 100);
+        // ★ : la cote Unibet paie nettement plus que ce que mes chances justifient
+        // (pas sur les outsiders, où l'estimation est trop incertaine)
+        const value = p.o && p.prob >= 0.2 && p.prob * p.o >= 1.2;
+        const title = `${p.n} : ${p.g} but${p.g > 1 ? "s" : ""}${p.xg != null ? `, xG ${String(p.xg).replace(".", ",")}` : ""} cette saison`
+          + ` — mes chances : ${pr}%${p.o ? ` — Unibet : ${Math.round(100 / p.o)}%` : " — pas de cote Unibet"}`;
+        return `<button class="odd sc-row ${picked.has(k) ? "picked" : ""}" data-pick="${k}" data-id="${m.id}" ${p.o ? "" : "disabled"} title="${esc(title)}">
+          <span class="odd-label">${esc(p.n)}<small>${p.g} but${p.g > 1 ? "s" : ""}${p.xg != null ? ` · xG ${String(p.xg).replace(".", ",")}` : ""}</small></span>
+          ${pctSpan(pr, "pct")}<b>${value ? `<i class="value">★</i>` : ""}${fmtOdds(p.o)}</b></button>`;
+      }).join("")}</div>
+      ${out.length ? `<p class="sc-out">Absents : ${out.map((o) => `${esc(o.n)} (${WHY[o.why] || "absent"}, ${o.g} but${o.g > 1 ? "s" : ""})`).join(" · ")}</p>` : ""}`;
+  };
+  return `<div class="scorers">
+    <h3>Buteurs <span class="muted small">· ${esc(LINEUP_LABEL[sc.lineup] || LINEUP_LABEL.null)}</span></h3>
+    ${side("h", m.h)}${side("a", m.a)}
+    <p class="dist-note">% = mes chances qu'il marque dans le temps réglementaire : buts et xG par 90 min cette saison,
+      temps de jeu habituel, compo, et défense adverse. <b>★</b> = cote Unibet plus généreuse que mes chances.
+      Vérifie la compo officielle, publiée environ 1 h avant le match.</p>
+  </div>`;
+}
+
 function cellsHTML(values) {
   const max = Math.max(...values, 1);
   const cell = (v) => `<div class="cell ${v ? "" : "zero"}" style="--r:${(v / max).toFixed(2)}">${v}</div>`;
@@ -345,6 +409,15 @@ function extractOdds(offers, [homeEn = "", awayEn = ""] = []) {
   return odds;
 }
 
+function refreshScorerOdds(m, offers) {
+  const cotes = new Map();
+  for (const b of offers) {
+    if (b.criterion?.englishLabel !== "To Score") continue;
+    for (const o of b.outcomes || []) if (o.participant && o.odds && (!o.status || o.status === "OPEN")) cotes.set(o.participant, o.odds / 1000);
+  }
+  for (const p of [...(m.scorers?.h || []), ...(m.scorers?.a || [])]) if (p.kn && cotes.has(p.kn)) p.o = cotes.get(p.kn);
+}
+
 async function refreshOdds() {
   const btn = $("#refresh-odds");
   const todo = dayMatches().filter((m) => m.kambi && !m.started);
@@ -358,8 +431,10 @@ async function refreshOdds() {
       try {
         const r = await fetch(`${KAMBI}/betoffer/event/${m.kambi}.json?lang=fr_FR&market=FR`);
         if (!r.ok) continue;
-        const odds = extractOdds((await r.json()).betOffers || [], m.kteams);
+        const offers = (await r.json()).betOffers || [];
+        const odds = extractOdds(offers, m.kteams);
         if (Object.keys(odds).length) { m.odds = odds; ok++; }
+        refreshScorerOdds(m, offers);
       } catch { /* réseau : on garde l'ancienne cote */ }
     }
   };
@@ -374,7 +449,11 @@ async function refreshOdds() {
 function slipSelections() {
   return [...state.slip.entries()].map(([id, set]) => {
     const m = matchById(id);
-    return { m, markets: [...set].map((k) => ({ k, odds: m.odds?.[k] ?? null })) };
+    return { m, markets: [...set].map((k) => {
+      if (!isScorer(k)) return { k, odds: m.odds?.[k] ?? null };
+      const p = scorerOf(m, k);
+      return { k, odds: p?.o ?? null, name: p?.n ?? "Joueur" };
+    }) };
   }).filter((s) => s.m);
 }
 
@@ -392,7 +471,7 @@ function renderSlip() {
   if (!count) {
     if ($("#slip-sheet").open) $("#slip-sheet").close();
     view.innerHTML = `<p class="empty">Ton bulletin est vide.<br>Dans l'onglet <b>Matchs</b>, touche une cote
-      (les 2 marquent, +1,5 buts, +2,5 buts ou +1,5 buts d'une équipe) pour l'ajouter.</p>`;
+      (les 2 marquent, +1,5 buts, +2,5 buts, +1,5 buts d'une équipe ou un buteur) pour l'ajouter.</p>`;
     return;
   }
   const suggested = suggestedOdds(sels);
@@ -408,7 +487,7 @@ function renderSlip() {
       <div>
         <div class="sel-title">${esc(team(m.h).name)} – ${esc(team(m.a).name)}</div>
         <div class="muted small">${comp(m.c).flag} ${esc(comp(m.c).name)} · ${fmtDate(m.t)} ${fmtTime(m.t)}</div>
-        <div class="sel-markets">${markets.map((mk) => `<span class="tag">${esc(marketLabel(mk.k, team(m.h).name, team(m.a).name))} <b>${fmtOdds(mk.odds)}</b>
+        <div class="sel-markets">${markets.map((mk) => `<span class="tag">${esc(marketLabel(mk.k, team(m.h).name, team(m.a).name, mk.name))} <b>${fmtOdds(mk.odds)}</b>
           <button data-unpick="${mk.k}" data-id="${m.id}" aria-label="Retirer">✕</button></span>`).join("")}</div>
       </div>
     </div>`).join("")}
@@ -484,17 +563,37 @@ function selectionScore(sel) {
   return sel.score || state.data?.results?.[sel.matchId] || null;
 }
 
-function selectionStatus(sel) {
+// Pari buteur : gagné s'il a marqué (hors contre son camp), remboursé s'il n'est pas entré en jeu
+const scorerResult = (info, id) => (!info ? null : info.g.includes(id) ? "won" : info.p.length && !info.p.includes(id) ? "void" : "lost");
+
+// "won" | "lost" | "void" | null (pas encore connu)
+function marketResult(sel, mk) {
+  if (isScorer(mk.k)) {
+    const id = scorerId(mk.k);
+    return sel.scr?.[id] ?? scorerResult(state.data?.scorers?.[sel.matchId], id);
+  }
   const sc = selectionScore(sel);
-  if (!sc) return "pending";
-  return sel.markets.every((mk) => marketWon(mk.k, sc)) ? "won" : "lost";
+  return sc ? (marketWon(mk.k, sc) ? "won" : "lost") : null;
+}
+
+const combine = (st) => (st.includes("lost") ? "lost" : st.some((s) => s === null || s === "pending") ? "pending"
+  : st.every((s) => s === "void") ? "void" : "won");
+
+function selectionStatus(sel) {
+  return combine(sel.markets.map((mk) => marketResult(sel, mk)));
 }
 
 function betStatus(bet) {
   if (bet.manual) return bet.manual;
-  const st = bet.selections.map(selectionStatus);
-  if (st.includes("lost")) return "lost";
-  return st.every((s) => s === "won") ? "won" : "pending";
+  return combine(bet.selections.map(selectionStatus));
+}
+
+// Une sélection remboursée (buteur non entré en jeu) sort du combiné : sa cote est retirée du total
+function effOdds(b) {
+  let odds = b.odds;
+  if (b.manual) return odds;
+  for (const s of b.selections) for (const mk of s.markets) if (mk.odds > 1 && marketResult(s, mk) === "void") odds /= mk.odds;
+  return odds;
 }
 
 // Recopie le score final dans le pari : il reste réglé même après la sortie du match des données.
@@ -504,7 +603,14 @@ function persistScores(bets) {
     let changed = false;
     const selections = bet.selections.map((s) => {
       const r = !s.score && state.data.results[s.matchId];
-      if (r) { changed = true; return { ...s, score: r }; }
+      if (r) { changed = true; s = { ...s, score: r }; }
+      // Résultat des paris buteur, figé lui aussi
+      const info = state.data.scorers?.[s.matchId];
+      const ids = s.markets.filter((mk) => isScorer(mk.k)).map((mk) => scorerId(mk.k));
+      if (info && ids.length && !s.scr) {
+        changed = true;
+        s = { ...s, scr: Object.fromEntries(ids.map((id) => [id, scorerResult(info, id)])) };
+      }
       return s;
     });
     if (changed) store.update(bet.id, { selections }).catch(console.error);
@@ -524,7 +630,7 @@ function renderBets() {
   const won = settled.filter((b) => b.status === "won");
   const lost = settled.filter((b) => b.status === "lost");
   const staked = settled.reduce((s, b) => s + b.stake, 0);
-  const returned = settled.reduce((s, b) => s + (b.status === "won" ? b.stake * b.odds : b.status === "void" ? b.stake : 0), 0);
+  const returned = settled.reduce((s, b) => s + betReturn(b), 0);
   const profit = returned - staked;
   const pending = bets.filter((b) => b.status === "pending");
   const sign = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "");
@@ -558,7 +664,7 @@ function renderBets() {
 
 function betCard(b) {
   const n = b.selections.length;
-  const gain = b.status === "won" ? b.stake * b.odds : b.status === "void" ? b.stake : 0;
+  const gain = betReturn(b);
   return `<div class="card">
     <div class="bet-head">
       <div><b>${n > 1 ? `Combiné × ${n}` : "Simple"}</b> <span class="muted small">· ${new Date(b.createdAt).toLocaleDateString("fr-FR")}</span></div>
@@ -570,8 +676,9 @@ function betCard(b) {
         <div class="sel-title">${esc(s.home)} – ${esc(s.away)} ${sc ? `<span class="muted">(${sc[0]}-${sc[1]})</span>` : ""}</div>
         <div class="muted small">${fmtDate(s.kickoff)} ${fmtTime(s.kickoff)}</div>
         <div class="sel-markets">${s.markets.map((mk) => {
-          const cls = sc ? (marketWon(mk.k, sc) ? "win" : "lose") : "";
-          return `<span class="tag ${cls}">${sc ? (marketWon(mk.k, sc) ? "✓" : "✗") : "⏳"} ${esc(marketLabel(mk.k, s.home, s.away))}${mk.odds ? ` · ${fmtOdds(mk.odds)}` : ""}</span>`;
+          const r = marketResult(s, mk);
+          const [cls, icon] = { won: ["win", "✓"], lost: ["lose", "✗"], void: ["void", "↺"] }[r] || ["", "⏳"];
+          return `<span class="tag ${cls}">${icon} ${esc(marketLabel(mk.k, s.home, s.away, mk.name))}${r === "void" ? " (remboursé)" : ""}${mk.odds ? ` · ${fmtOdds(mk.odds)}` : ""}</span>`;
         }).join("")}</div>
       </div></div>`;
     }).join("")}
@@ -590,7 +697,7 @@ function betCard(b) {
 
 // ================================================================ Portefeuille et profil
 
-const betReturn = (b) => (b.status === "won" ? b.stake * b.odds : b.status === "void" ? b.stake : 0);
+const betReturn = (b) => (b.status === "won" ? b.stake * effOdds(b) : b.status === "void" ? b.stake : 0);
 
 function wallet() {
   const sum = (type) => state.transactions.filter((t) => t.type === type).reduce((s, t) => s + t.amount, 0);

@@ -2,7 +2,8 @@
 """Collecte des données pour l'app Pronos Foot.
 
 - Matchs, résultats et minutes des buts : FotMob (API publique non officielle)
-- Cotes Unibet (BTTS + plus de 2,5 buts) : Kambi, la plateforme de paris d'Unibet
+- Buteurs : compos probables/officielles, absents, xG et minutes des joueurs (FotMob)
+- Cotes Unibet (BTTS, plus de 1,5 / 2,5 buts, buteurs) : Kambi, la plateforme de paris d'Unibet
 
 Le script est lancé par une GitHub Action. Il produit :
 - data/matches.json : matchs à venir + stats des équipes + cotes + résultats récents
@@ -16,6 +17,7 @@ import re
 import sys
 import time
 import unicodedata
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -64,6 +66,10 @@ FOOTBALL_GROUP = 1000093190
 WINDOW_BEFORE = timedelta(hours=30)
 WINDOW_AFTER = timedelta(days=3)
 RESULTS_DAYS = 60
+# Joueurs ayant joué / buteurs des matchs récents : gardés quelques jours pour régler les paris buteur
+PLAYED_DAYS = 10
+# Compos et buteurs calculés pour les matchs des prochaines 48 h
+SCORERS_AHEAD = timedelta(hours=48)
 
 
 def log(*a):
@@ -101,8 +107,20 @@ def bucket(minute):
     return min(5, max(0, (minute - 1) // 15))
 
 
+def played_ids(lineup):
+    """Joueurs entrés en jeu (titulaires + remplaçants entrés), pour rembourser un pari buteur sur un absent."""
+    ids = []
+    for side in ("homeTeam", "awayTeam"):
+        t = (lineup or {}).get(side) or {}
+        ids += [p["id"] for p in t.get("starters") or [] if p.get("id")]
+        ids += [p["id"] for p in t.get("subs") or [] if p.get("id") and any(
+            ev.get("type") == "subIn" for ev in ((p.get("performance") or {}).get("substitutionEvents") or []))]
+    return ids
+
+
 def fetch_goals(match_id):
-    """Buts du temps réglementaire : liste de [minute, 1 si domicile sinon 0]."""
+    """Buts du temps réglementaire : liste de [minute, 1 si domicile sinon 0, id du buteur (0 = contre son camp)],
+    plus la liste des joueurs entrés en jeu."""
     d = get_json(f"{FOTMOB}/matchDetails?matchId={match_id}")
     if not d:
         return None
@@ -118,8 +136,9 @@ def fetch_goals(match_id):
         # Prolongations (91' à 120') exclues : les paris BTTS / +2,5 se règlent sur 90 min.
         if minute > 90:
             continue
-        goals.append([minute, 1 if e.get("isHome") else 0])
-    return goals
+        scorer = 0 if e.get("ownGoal") else (e.get("playerId") or (e.get("player") or {}).get("id") or 0)
+        goals.append([minute, 1 if e.get("isHome") else 0, scorer])
+    return {"g": goals, "p": played_ids(d["content"].get("lineup"))}
 
 
 def collect_fotmob(now):
@@ -138,6 +157,11 @@ def collect_fotmob(now):
             log(f"[{comp['name']}] indisponible")
             continue
         comp["season"] = d.get("details", {}).get("selectedSeason")
+        # Classements joueurs de la saison (buts, xG…) : servent au % de chances des buteurs
+        comp["statUrls"] = {s.get("name"): s.get("fetchAllUrl")
+                            for s in (d.get("stats") or {}).get("players") or [] if s.get("fetchAllUrl")}
+        seasons = d.get("allAvailableSeasons") or []
+        comp["prevSeason"] = seasons[1] if len(seasons) > 1 and seasons[0] == comp["season"] else None
         matches = (d.get("fixtures") or {}).get("allMatches") or []
         nb_up = 0
         for m in matches:
@@ -174,19 +198,24 @@ def collect_fotmob(now):
         return mid, fetch_goals(mid)
 
     with ThreadPoolExecutor(max_workers=6) as ex:
-        for i, (mid, goals) in enumerate(ex.map(work, todo), 1):
-            if goals is not None:
-                fetched[mid] = goals
+        for i, (mid, res) in enumerate(ex.map(work, todo), 1):
+            if res is not None:
+                fetched[mid] = res
             if i % 200 == 0:
                 log(f"  {i}/{len(todo)}")
 
     # Cache = uniquement les matchs des saisons en cours (les anciennes disparaissent d'elles-mêmes)
     new_cache = {}
+    played_limit = now - timedelta(days=PLAYED_DAYS)
     for mid, f in finished.items():
-        goals = fetched.get(mid, old_matches.get(mid, {}).get("g"))
-        if goals is None:
+        res = fetched.get(mid) or old_matches.get(mid)
+        if res is None:
             continue
-        new_cache[mid] = {**{k: f[k] for k in ("c", "t", "h", "a")}, "g": goals}
+        entry = {**{k: f[k] for k in ("c", "t", "h", "a")}, "g": res["g"]}
+        # La liste des joueurs entrés en jeu ne sert qu'aux paris récents
+        if res.get("p") and parse_utc(f["t"]) >= played_limit:
+            entry["p"] = res["p"]
+        new_cache[mid] = entry
     return teams, new_cache, upcoming, finished
 
 
@@ -198,7 +227,7 @@ def empty_stats():
 def team_stats(cache, team_ids):
     stats = {tid: {"all": empty_stats(), "home": empty_stats(), "away": empty_stats()} for tid in team_ids}
     for m in cache.values():
-        hg = sum(1 for _, home in m["g"] if home)
+        hg = sum(1 for g in m["g"] if g[1])
         ag = len(m["g"]) - hg
         for side, tid in (("home", m["h"]), ("away", m["a"])):
             if tid not in stats:
@@ -212,7 +241,7 @@ def team_stats(cache, team_ids):
                 s["o25"] += hg + ag >= 3
                 s["f2"] += own >= 2
                 s["a2"] += opp >= 2
-                for minute, is_home in m["g"]:
+                for minute, is_home, *_ in m["g"]:
                     scored = bool(is_home) == (side == "home")
                     b = bucket(minute)
                     if scored:
@@ -222,6 +251,177 @@ def team_stats(cache, team_ids):
                         s["ga"] += 1
                         s["sa"][b] += 1
     return stats
+
+
+# ---------------------------------------------------------------- Buteurs
+
+# Taux de buts par 90 min « a priori » selon le poste (0 gardien, 1 défenseur, 2 milieu, 3 attaquant),
+# utilisé pour lisser les joueurs qui ont encore peu joué.
+POS_PRIOR = {0: 0.0, 1: 0.04, 2: 0.12, 3: 0.35}
+PRIOR_90 = 1.5        # poids du a priori : l'équivalent d'un match et demi
+PREV_WEIGHT = 0.5     # la saison précédente compte moitié moins que la saison en cours
+# Sans compo, on retient les joueurs les plus utilisés de la saison : des titulaires habituels
+START_PROB = {"confirmed": 1.0, "predicted": 0.9, None: 0.85}
+
+
+def prev_season_urls(comp):
+    if not comp.get("prevSeason"):
+        return {}
+    d = get_json(f"{FOTMOB}/leagues?id={comp['id']}&season={urllib.parse.quote(comp['prevSeason'])}")
+    return {s.get("name"): s.get("fetchAllUrl") for s in ((d or {}).get("stats") or {}).get("players") or [] if s.get("fetchAllUrl")}
+
+
+def player_stats():
+    """Buts, xG et minutes de chaque joueur dans son championnat (une liste par compétition suivie),
+    pour la saison en cours et, en appoint, la saison précédente."""
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        prev_urls = list(ex.map(prev_season_urls, COMPETITIONS))
+    cur = read_player_lists([(c, c.get("statUrls") or {}) for c in COMPETITIONS])
+    prev = read_player_lists(list(zip(COMPETITIONS, prev_urls)))
+    for pid, p in cur.items():
+        if pid in prev:
+            p["prev"] = {k: prev[pid].get(k) for k in ("g", "xg", "min")}
+    # Joueurs sans minute cette saison (blessés longtemps, recrues) : la saison précédente seule
+    for pid, p in prev.items():
+        cur.setdefault(pid, {"team": None, "name": p["name"], "min": 0, "mp": 0, "g": 0, "prev": {k: p.get(k) for k in ("g", "xg", "min")}})
+    log(f"Stats joueurs : {len(cur)} joueurs (saison précédente : {len(prev)})")
+    return cur
+
+
+def read_player_lists(comps_urls):
+    out = {}
+    jobs = [(c, name, urls[name]) for c, urls in comps_urls for name in ("goals", "expected_goals") if urls.get(name)]
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        lists = ex.map(lambda j: (j[:2], get_json(j[2])), jobs)
+        for (c, name), d in lists:
+            for top in (d or {}).get("TopLists") or []:
+                for r in top.get("StatList") or []:
+                    pid = r.get("ParticiantId") or r.get("ParticipantId")
+                    if not pid:
+                        continue
+                    p = out.setdefault(pid, {"team": r.get("TeamId"), "name": r.get("ParticipantName")})
+                    # On garde la compétition où le joueur a le plus joué (championnat plutôt que coupe d'Europe)
+                    mins = r.get("MinutesPlayed") or 0
+                    if p.get("c") not in (None, c["id"]) and mins <= p.get("min", 0):
+                        continue
+                    p.update(c=c["id"], min=mins, mp=r.get("MatchesPlayed") or 0)
+                    if name == "goals":
+                        p["g"] = r.get("StatValue") or 0
+                    else:
+                        p["xg"] = r.get("StatValue") or 0
+                        p.setdefault("g", r.get("SubStatValue") or 0)
+    return out
+
+
+def per90(pos, goals, xg, minutes, prev=None):
+    """Buts attendus par 90 min : moitié buts réels, moitié xG (plus stable), complétés par la saison
+    précédente (comptée moitié) et lissés vers la moyenne du poste."""
+    s = goals if xg is None else (goals + xg) / 2
+    n = minutes / 90
+    if prev and prev.get("min"):
+        ps = prev.get("g") or 0
+        if prev.get("xg") is not None:
+            ps = (ps + prev["xg"]) / 2
+        s += ps * PREV_WEIGHT
+        n += prev["min"] / 90 * PREV_WEIGHT
+    return (s + POS_PRIOR.get(pos, 0.12) * PRIOR_90) / (n + PRIOR_90)
+
+
+def build_scorers(details, side, team_id, pstats, team_n):
+    lineup = (details.get("content") or {}).get("lineup") or {}
+    kind = lineup.get("lineupType") if lineup.get("lineupType") in ("predicted", "confirmed") else None
+    if kind is None and lineup.get("lineupType") == "standard":
+        kind = "confirmed"
+    t = lineup.get(side) or {}
+    out = [{"id": p.get("id"), "n": p.get("name"), "why": (p.get("unavailability") or {}).get("type"),
+            "ret": (p.get("unavailability") or {}).get("expectedReturn"),
+            "g": (p.get("performance") or {}).get("seasonGoals") or (pstats.get(p.get("id")) or {}).get("g") or 0}
+           for p in t.get("unavailable") or []]
+    out_ids = {o["id"] for o in out}
+    starters = [p for p in t.get("starters") or [] if p.get("id") not in out_ids]
+    if not starters:
+        # Pas encore de compo : on prend les joueurs les plus utilisés de l'équipe cette saison
+        kind = None
+        pool = sorted((pid for pid, s in pstats.items() if s.get("team") == team_id and pid not in out_ids and s.get("min")),
+                      key=lambda pid: -pstats[pid].get("min", 0))[:11]
+        starters = [{"id": pid, "name": pstats[pid]["name"], "usualPlayingPositionId": None} for pid in pool]
+    players = []
+    for p in starters:
+        pos = p.get("usualPlayingPositionId")
+        if pos == 0 or p.get("positionId") == 11:
+            continue  # gardien
+        s = pstats.get(p["id"])
+        prev = (s or {}).get("prev")
+        if s and (s.get("min") or prev):
+            goals, xg, minutes = s.get("g", 0), s.get("xg"), s.get("min") or 0
+            avg_min = minutes / s["mp"] if s.get("mp") else 75
+        else:
+            # Hors des championnats suivis : buts de la saison donnés par la compo, minutes estimées
+            goals = (p.get("performance") or {}).get("seasonGoals") or 0
+            xg, minutes, avg_min = None, 75 * max(1, team_n), 75
+        if pos is None:
+            pos = 3 if goals / max(1, minutes / 90) > 0.25 else 2
+        players.append({
+            "id": p["id"], "n": p.get("name"), "pos": pos,
+            "r": round(per90(pos, goals, xg, minutes, prev), 3),
+            "min": round(min(88, max(60, avg_min))),
+            "st": START_PROB[kind], "g": goals, "xg": None if xg is None else round(xg, 1),
+        })
+    players.sort(key=lambda x: -x["r"] * x["min"])
+    return kind, players[:5], [o for o in out if o["g"]][:5]
+
+
+def attach_scorers(upcoming, stats, now):
+    pstats = player_stats()
+    todo = [m for m in upcoming if not m["started"] and parse_utc(m["t"]) <= now + SCORERS_AHEAD]
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        details = list(ex.map(lambda m: get_json(f"{FOTMOB}/matchDetails?matchId={m['id']}"), todo))
+    nb = 0
+    for m, d in zip(todo, details):
+        if not d:
+            continue
+        sc = {}
+        for side, key, tid in (("homeTeam", "h", m["h"]), ("awayTeam", "a", m["a"])):
+            kind, players, out = build_scorers(d, side, tid, pstats, stats[tid]["all"]["n"])
+            sc[key], sc[f"{key}Out"] = players, out
+            sc["lineup"] = kind
+        if sc["h"] or sc["a"]:
+            m["scorers"] = sc
+            nb += 1
+    log(f"Buteurs : {nb}/{len(todo)} matchs")
+
+
+def name_key(n):
+    n = unicodedata.normalize("NFKD", n or "").encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z ]", " ", n).split()
+
+
+def same_player(a, b):
+    ka, kb = name_key(a), name_key(b)
+    if not ka or not kb:
+        return False
+    if ka == kb or " ".join(ka) in " ".join(kb) or " ".join(kb) in " ".join(ka):
+        return True
+    # Même nom de famille et même initiale (« G. Ramos » / « Gonçalo Ramos »)
+    return ka[-1] == kb[-1] and ka[0][0] == kb[0][0]
+
+
+def attach_scorer_odds(m, offers):
+    """Cotes Unibet « buteur à tout moment du match » (marché « To Score »)."""
+    sc = m.get("scorers")
+    if not sc:
+        return
+    cotes = []
+    for b in offers:
+        if (b.get("criterion") or {}).get("englishLabel") != "To Score":
+            continue
+        for o in b.get("outcomes", []):
+            if o.get("odds") and o.get("participant") and o.get("status", "OPEN") == "OPEN":
+                cotes.append((o["participant"], o["odds"] / 1000))
+    for p in sc["h"] + sc["a"]:
+        hit = next(((n, odd) for n, odd in cotes if same_player(p["n"], n)), None)
+        if hit:
+            p["kn"], p["o"] = hit
 
 
 # ---------------------------------------------------------------- Kambi (Unibet)
@@ -334,13 +534,14 @@ def attach_odds(upcoming, teams, now):
     for m in upcoming:
         if "kambi" in m:
             m["odds"] = extract_odds(by_event.get(m["kambi"], []), *m["kteams"])
+            attach_scorer_odds(m, by_event.get(m["kambi"], []))
     log(f"Cotes : {matched}/{len(upcoming)} matchs associés à Unibet")
 
 
 # ---------------------------------------------------------------- main
 
 def regulation_score(m):
-    hg = sum(1 for _, home in m["g"] if home)
+    hg = sum(1 for g in m["g"] if g[1])
     return [hg, len(m["g"]) - hg]
 
 
@@ -352,14 +553,17 @@ def main():
         log("Aucune donnée récupérée : on garde les fichiers existants.")
         sys.exit(1)
 
-    attach_odds(upcoming, teams, now)
-
     involved = {m["h"] for m in upcoming} | {m["a"] for m in upcoming}
     stats = team_stats(cache, involved)
+    attach_scorers(upcoming, stats, now)
+    attach_odds(upcoming, teams, now)
 
     # Résultats récents (score à 90 min) pour régler automatiquement les paris
     limit = now - timedelta(days=RESULTS_DAYS)
     results = {mid: regulation_score(m) for mid, m in cache.items() if parse_utc(m["t"]) >= limit}
+    # Buteurs (hors contre son camp) et joueurs entrés en jeu des matchs récents : règlement des paris buteur
+    scorers = {mid: {"g": sorted({g[2] for g in m["g"] if len(g) > 2 and g[2]}), "p": m["p"]}
+               for mid, m in cache.items() if m.get("p")}
 
     out = {
         "generatedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -368,6 +572,7 @@ def main():
         "matches": sorted(upcoming, key=lambda m: (m["t"], m["c"])),
         "teams": {tid: {"name": teams[tid], "stats": stats[tid]} for tid in involved},
         "results": results,
+        "scorers": scorers,
     }
     OUT_FILE.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")))
     CACHE_FILE.write_text(json.dumps({"matches": cache}, separators=(",", ":")))

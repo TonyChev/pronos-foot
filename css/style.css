@@ -169,6 +169,20 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 .odd:disabled { opacity: .5; cursor: default; }
 .odd .pct { font-size: 11px; color: var(--muted); }
 
+/* ---------- Buteurs ---------- */
+.scorers { margin: 0 12px 10px; padding: 10px 12px; border-radius: 4px; background: var(--surface-2); }
+.scorers h3 { margin: 0 0 6px; font-family: var(--display); font-size: 14.5px; text-transform: uppercase; font-style: italic; }
+.sc-team { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; margin: 8px 0 5px; }
+.sc-team .logo { width: 18px; height: 18px; }
+.odds-row.sc { padding: 0; grid-template-columns: 1fr; gap: 5px; }
+.odd.sc-row { flex-direction: row; align-items: center; gap: 10px; padding: 6px 10px; }
+.odd.sc-row .odd-label { flex: 1; font-size: 13.5px; display: flex; flex-direction: column; }
+.odd.sc-row .odd-label small { font-weight: 500; font-size: 11px; color: var(--muted); }
+.odd.sc-row b { min-width: 52px; text-align: right; }
+.odd .value { font-style: normal; color: var(--pink); margin-right: 3px; font-size: 13px; }
+.sc-out { margin: 5px 0 0; font-size: 11.5px; color: var(--muted); }
+.tag.void { opacity: .8; }
+
 /* ---------- Mon avis ---------- */
 .verdict {
   display: flex; flex-direction: column; gap: 3px; margin: 0 12px 10px; padding: 9px 12px 9px 16px;

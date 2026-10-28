@@ -73,3 +73,11 @@ python3 -m http.server 8765    # puis ouvrir http://localhost:8765
 
 ## Publier une nouvelle version
 Les fichiers sont appelés avec un numéro de version (`?v=...` dans `index.html`, `js/app.js` et `js/store.js`). Change ce numéro à chaque modification du code, sinon les téléphones peuvent garder l'ancienne version en cache.
+
+## Buteurs
+
+Pour chaque match des prochaines 48 h, le script récupère sur FotMob la compo probable (puis officielle),
+les absents (blessés, suspendus) et, pour chaque joueur, ses buts, xG et minutes de la saison en cours
+et de la précédente. L'app en déduit ses chances de marquer, ajustées à la défense adverse, et les compare
+à la cote Unibet « buteur » (★ = cote plus généreuse que l'estimation). Un pari buteur est gagné si le joueur
+marque (hors contre son camp) et remboursé s'il n'entre pas en jeu.
