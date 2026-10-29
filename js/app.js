@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610281615";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610291044";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -96,6 +96,8 @@ function renderMatches() {
 
 // ================================================================ Combinés suggérés
 
+const COMBO_MIN = 0.7;
+
 function renderCombos() {
   const days = [0, 1].map((d) => { const x = new Date(); x.setDate(x.getDate() + d); return localDay(x); });
   // Matchs déjà joués dans un pari en cours : on ne les repropose pas
@@ -103,7 +105,8 @@ function renderCombos() {
   const picks = state.data.matches
     .filter((m) => !m.started && !m.finished && new Date(m.t) > Date.now() && days.includes(localDay(new Date(m.t))) && !taken.has(m.id))
     .map(bestPick)
-    .filter((p) => p && p.p >= MAYBE(p.k));
+    // Combinés : uniquement des sélections « je miserais », validées par le garde-fou Unibet
+    .filter((p) => p && p.lv === "yes");
   const pairs = [];
   for (let i = 0; i < picks.length; i++) {
     for (let j = i + 1; j < picks.length; j++) {
@@ -113,7 +116,8 @@ function renderCombos() {
   // Les plus sûrs d'abord, chaque match n'apparaît que dans une seule suggestion
   const used = new Set();
   state.combos = [];
-  for (const c of pairs.sort((x, y) => y.p - x.p)) {
+  // Les 2 sélections doivent passer ensemble au moins 7 fois sur 10
+  for (const c of pairs.filter((x) => x.p >= COMBO_MIN).sort((x, y) => y.p - x.p)) {
     if (c.legs.some((l) => used.has(l.m.id))) continue;
     c.legs.forEach((l) => used.add(l.m.id));
     state.combos.push(c);
@@ -123,7 +127,7 @@ function renderCombos() {
   $("#combos").innerHTML = `<details class="card combos" ${state.combosOpen ? "open" : ""}>
     <summary><h2>Mes combinés suggérés (${state.combos.length})</h2></summary>
     <p class="hint">Combinés de 2 matchs d'aujourd'hui et de demain, classés par chances que les 2 sélections passent.
-      Les matchs déjà dans un pari en cours sont exclus.</p>
+      Uniquement des sélections « je miserais » sur lesquelles Unibet est d'accord, et des combinés qui passent au moins 7 fois sur 10 ; les matchs déjà dans un pari en cours sont exclus.</p>
     ${state.combos.length ? state.combos.map((c, i) => `<div class="combo">
       ${c.legs.map((l) => `<div class="combo-leg">
         <span class="muted small">${dayLabel(l.m.t)} ${fmtTime(l.m.t)} · ${comp(l.m.c).flag} ${esc(comp(l.m.c).name)}</span>
@@ -144,7 +148,7 @@ function matchCard(m) {
   const open = !state.closed.has(m.id);
   const [hs, as] = (m.score || "").split(" - ");
   let ko = `<div class="kickoff">${fmtTime(m.t)}</div>`;
-  if (m.finished) ko = `<div class="kickoff">Terminé</div>`;
+  if (m.finished) ko = `<div class="kickoff">Fin</div>`;
   else if (m.started) ko = `<div class="kickoff live">${esc(m.live || "En cours")}</div>`;
   const picked = state.slip.get(m.id) || new Set();
   const locked = m.started || m.finished;
@@ -197,6 +201,13 @@ const poisson = (lambda, k) => {
 // avec peu de matchs à domicile, on se fie davantage à l'ensemble de la saison.
 const PRIOR = 3;
 const rate = (split, all, key) => (all.n ? (split[key] + (all[key] / all.n) * PRIOR) / (split.n + PRIOR) : 0);
+// Même calcul sur les xG (qualité des occasions), quand FotMob les fournit pour au moins 3 matchs
+const xrate = (split, all, key) => (all.nx >= 3 ? (split[key] + (all[key] / all.nx) * PRIOR) / (split.nx + PRIOR) : null);
+// Buts attendus : moitié buts réels, moitié xG (testé sur les matchs de la saison : légèrement plus fiable)
+const blend = (split, all, g, x) => {
+  const xr = xrate(split, all, x);
+  return xr === null ? rate(split, all, g) : (rate(split, all, g) + xr) / 2;
+};
 
 // Fréquence observée cette saison. Pour « équipe +1,5 », on croise l'attaque de l'équipe
 // (matchs où elle a marqué 2 buts ou plus) avec la défense adverse (matchs où l'adversaire en a encaissé 2 ou plus).
@@ -215,8 +226,8 @@ function estimate(m) {
   const H = team(m.h).stats, A = team(m.a).stats;
   if (H.all.n < 4 || A.all.n < 4) return null;
   // Buts attendus : attaque de l'un croisée avec la défense de l'autre (loi de Poisson)
-  const lh = (rate(H.home, H.all, "gf") + rate(A.away, A.all, "ga")) / 2;
-  const la = (rate(A.away, A.all, "gf") + rate(H.home, H.all, "ga")) / 2;
+  const lh = (blend(H.home, H.all, "gf", "xf") + blend(A.away, A.all, "ga", "xa")) / 2;
+  const la = (blend(A.away, A.all, "gf", "xf") + blend(H.home, H.all, "ga", "xa")) / 2;
   const model = {
     btts: (1 - Math.exp(-lh)) * (1 - Math.exp(-la)),
     o15: 1 - atMost(lh + la, 1),
@@ -224,28 +235,59 @@ function estimate(m) {
     h15: 1 - atMost(lh, 1),
     a15: 1 - atMost(la, 1),
   };
-  // Mélange avec les fréquences réellement observées cette saison
-  const est = { lh, la };
-  for (const k of ALL_MARKETS) est[k] = 0.6 * model[k] + 0.4 * freq(m, k);
+  // Mélange avec les fréquences réellement observées cette saison, puis recalage sur les résultats réels.
+  // Enfin, moitié mes stats, moitié l'avis d'Unibet (sa cote sans sa marge) : le bookmaker sait des choses
+  // que les stats ignorent (compos, forme, enjeu, météo), et les deux avis réunis se trompent moins souvent.
+  const est = { lh, la, stats: {} };
+  for (const k of ALL_MARKETS) {
+    est.stats[k] = calibrate(k, 0.6 * model[k] + 0.4 * freq(m, k));
+    const u = unibetProb(m.odds?.[k]);
+    est[k] = u === null ? est.stats[k] : (est.stats[k] + u) / 2;
+  }
   return est;
 }
 
+// Recalage mesuré sur ~1 700 matchs de la saison (chaque match estimé avec les seuls matchs joués avant lui) :
+// le calcul brut était trop optimiste de 3 à 7 points. Ex. un « +1,5 buts » annoncé à 89 % ne passait que 85 % du temps.
+const CALIBRATION = { btts: [0.19, 0.545], o15: [0.716, 0.562], o25: [0.256, 0.494], h15: [0.184, 0.875], a15: [-0.161, 0.683] };
+function calibrate(k, p) {
+  const [a, b] = CALIBRATION[k];
+  const q = Math.min(0.99, Math.max(0.01, p));
+  return 1 / (1 + Math.exp(-(a + b * Math.log(q / (1 - q)))));
+}
+
+// Chances selon Unibet : inverse de la cote, moins la marge du bookmaker (~5 %)
+const UNIBET_MARGIN = 0.95;
+const unibetProb = (odds) => (odds > 1 ? UNIBET_MARGIN / odds : null);
+// Garde-fou : si mes stats sont nettement plus optimistes qu'Unibet, je ne conseille pas le pari
+const doubtful = (m, est, k) => {
+  const u = unibetProb(m.odds?.[k]);
+  return u !== null && est.stats[k] - u > 0.08;
+};
+
 // L'avis ne regarde que la probabilité : en combiné, une cote basse sur un match reste utile.
 // « +1,5 buts » passe naturellement plus souvent : ses seuils sont donc plus exigeants.
-const THRESHOLDS = { o15: [0.85, 0.78] };
-const DEFAULT_THRESHOLDS = [0.68, 0.6];
+const THRESHOLDS = { o15: [0.84, 0.8] };
+const DEFAULT_THRESHOLDS = [0.68, 0.63];
 const YES = (k) => (THRESHOLDS[k] || DEFAULT_THRESHOLDS)[0];
 const MAYBE = (k) => (THRESHOLDS[k] || DEFAULT_THRESHOLDS)[1];
 const level = (p, k) => (p >= YES(k) ? "yes" : p >= MAYBE(k) ? "maybe" : "no");
+// Niveau final d'un marché sur un match : un pari douteux (Unibet bien moins confiant) passe au mieux en « jouable »
+const marketLevel = (m, est, k) => {
+  const lv = level(est[k], k);
+  return lv === "yes" && doubtful(m, est, k) ? "maybe" : lv;
+};
 // Marge au-dessus du seuil « je miserais » : sert à choisir le marché le plus convaincant
-const margin = (est, k) => est[k] - YES(k);
+// (un marché douteux passe derrière les autres)
+const margin = (est, k, m) => est[k] - YES(k) - (m && doubtful(m, est, k) ? 1 : 0);
 
 // Marché le plus convaincant d'un match parmi ceux qui ont une cote Unibet
 function bestPick(m) {
   const est = estimate(m);
   if (!est) return null;
-  const k = ALL_MARKETS.filter((x) => m.odds?.[x]).sort((x, y) => margin(est, y) - margin(est, x))[0];
-  return k ? { m, k, p: est[k], odds: m.odds[k] } : null;
+  // Pour un combiné, on prend le marché « je miserais » qui a le plus de chances de passer
+  const k = ALL_MARKETS.filter((x) => m.odds?.[x] && marketLevel(m, est, x) === "yes").sort((x, y) => est[y] - est[x])[0];
+  return k ? { m, k, p: est[k], odds: m.odds[k], lv: "yes" } : null;
 }
 
 function verdictHTML(m) {
@@ -254,8 +296,8 @@ function verdictHTML(m) {
     return `<div class="verdict no"><b>Mon avis : je ne miserais pas</b><span>Pas assez de matchs joués cette saison pour juger.</span></div>`;
   }
   const home = team(m.h).name, away = team(m.a).name;
-  const best = [...ALL_MARKETS].sort((x, y) => margin(est, y) - margin(est, x))[0];
-  const lv = level(est[best], best);
+  const best = [...ALL_MARKETS].sort((x, y) => margin(est, y, m) - margin(est, x, m))[0];
+  const lv = marketLevel(m, est, best);
   const name = esc(shortLabel(best, home, away));
   const title = {
     yes: `je miserais sur « ${name} »`,
@@ -265,8 +307,10 @@ function verdictHTML(m) {
   const line = (k) => {
     const p = Math.round(est[k] * 100);
     const o = m.odds?.[k];
-    const tag = `<i class="dot ${level(est[k], k)}"></i>`;
-    return `<span>${tag} ${esc(shortLabel(k, home, away))} : ${pctSpan(p)}${o ? ` · cote ${fmtOdds(o)}` : ""}</span>`;
+    const tag = `<i class="dot ${marketLevel(m, est, k)}"></i>`;
+    const warn = doubtful(m, est, k) && level(est[k], k) !== "no"
+      ? ` <span class="warn">⚠ Unibet moins confiant (${Math.round(unibetProb(o) * 100)}% contre ${Math.round(est.stats[k] * 100)}% pour mes stats)</span>` : "";
+    return `<span>${tag} ${esc(shortLabel(k, home, away))} : ${pctSpan(p)}${o ? ` · cote ${fmtOdds(o)}` : ""}${warn}</span>`;
   };
   return `<div class="verdict ${lv}">
     <b>Mon avis : ${title}</b>
@@ -370,7 +414,7 @@ function distHTML(m) {
     </div>
     <p class="dist-note">Part des matchs de chaque équipe cette saison${mode === "all" ? "" : " (à domicile pour la 1ʳᵉ, à l'extérieur pour la 2ᵉ)"} :
       « Match +1,5 » = au moins 2 buts dans le match, les 2 équipes confondues ; « A marqué 2+ » = l'équipe elle-même a marqué au moins 2 buts.
-      Les % des cotes et de « Mon avis » sont mes chances estimées pour ce match précis.</p>
+      Les % des cotes et de « Mon avis » sont mes chances estimées pour ce match précis (moitié mes stats, moitié la cote Unibet).</p>
   </div>`;
 }
 

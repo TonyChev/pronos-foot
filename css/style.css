@@ -138,10 +138,10 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 .odd.picked .good, .odd.picked .bad { color: var(--ink); }
 
 .match-head {
-  display: grid; grid-template-columns: 46px 1fr 18px; align-items: center; gap: 6px;
+  display: grid; grid-template-columns: auto 1fr 18px; align-items: center; gap: 8px;
   width: 100%; padding: 8px 12px 10px; border: 0; background: none; text-align: left;
 }
-.kickoff { font-family: var(--display); font-weight: 700; font-size: 15px; text-align: center; line-height: 1.2; }
+.kickoff { font-family: var(--display); font-weight: 700; font-size: 15px; text-align: center; line-height: 1.2; min-width: 46px; white-space: nowrap; }
 .kickoff.live { color: var(--bad); }
 /* Les deux équipes sur une seule ligne, alignées à gauche contre l'heure du match */
 .teams { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -202,6 +202,7 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 .verdict.maybe::before { background: var(--text); }
 .verdict.no::before { background: var(--pink); }
 .verdict.no b { color: var(--bad); }
+.verdict .warn { color: var(--bad); font-size: 12px; font-weight: 600; }
 
 /* ---------- Combinés suggérés (bloc vedette) ---------- */
 .card.combos { background: var(--hero); color: var(--hero-text); border-top: 3px solid var(--pink); }

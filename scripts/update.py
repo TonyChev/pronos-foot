@@ -65,6 +65,7 @@ FOOTBALL_GROUP = 1000093190
 WINDOW_BEFORE = timedelta(hours=30)
 WINDOW_AFTER = timedelta(days=3)
 RESULTS_DAYS = 60
+XG_BACKFILL = 400      # matchs anciens dont on récupère les xG à chaque passage
 # Joueurs ayant joué / buteurs des matchs récents : gardés quelques jours pour régler les paris buteur
 PLAYED_DAYS = 10
 # Compos et buteurs calculés pour les matchs des prochaines 48 h
@@ -137,7 +138,19 @@ def fetch_goals(match_id):
             continue
         scorer = 0 if e.get("ownGoal") else (e.get("playerId") or (e.get("player") or {}).get("id") or 0)
         goals.append([minute, 1 if e.get("isHome") else 0, scorer])
-    return {"g": goals, "p": played_ids(d["content"].get("lineup"))}
+    return {"g": goals, "p": played_ids(d["content"].get("lineup")), "x": team_xg(d)}
+
+
+def team_xg(d):
+    """xG (buts attendus) des 2 équipes : la qualité des occasions, plus stable que le score."""
+    try:
+        for per in d["content"]["stats"]["Periods"]["All"]["stats"]:
+            for st in per.get("stats") or []:
+                if st.get("key") == "expected_goals":
+                    return [round(float(v), 2) for v in st["stats"]]
+    except (KeyError, TypeError, ValueError):
+        pass
+    return None
 
 
 def collect_fotmob(now):
@@ -186,8 +199,10 @@ def collect_fotmob(now):
         log(f"[{comp['country']} - {comp['name']}] {comp['season']} : "
             f"{sum(1 for f in finished.values() if f['c'] == comp['id'])} terminés, {nb_up} à venir")
 
-    # Détails des buts : seulement pour les matchs terminés pas encore en cache
+    # Détails des buts : seulement pour les matchs terminés pas encore en cache,
+    # plus un rattrapage progressif des xG des matchs mis en cache avant leur ajout
     todo = [mid for mid in finished if mid not in old_matches]
+    todo += [mid for mid in finished if mid in old_matches and "x" not in old_matches[mid]][:XG_BACKFILL]
     log(f"Détails à télécharger : {len(todo)} matchs")
     fetched = {}
 
@@ -209,6 +224,12 @@ def collect_fotmob(now):
         if res is None:
             continue
         entry = {**{k: f[k] for k in ("c", "t", "h", "a")}, "g": res["g"]}
+        if old_matches.get(mid, {}).get("o"):
+            entry["o"] = old_matches[mid]["o"]
+        # xG du match ; null = indisponible chez FotMob (on ne le redemande pas)
+        entry["x"] = res.get("x") if "x" in res or mid in fetched else old_matches.get(mid, {}).get("x")
+        if entry["x"] is None and "x" not in res and mid not in fetched:
+            del entry["x"]
         # La liste des joueurs entrés en jeu ne sert qu'aux paris récents
         if res.get("p") and parse_utc(f["t"]) >= played_limit:
             entry["p"] = res["p"]
@@ -218,7 +239,9 @@ def collect_fotmob(now):
 
 def empty_stats():
     # f2 / a2 : matchs où l'équipe a marqué / encaissé au moins 2 buts (marché « équipe +1,5 »)
-    return {"n": 0, "gf": 0, "ga": 0, "sf": [0] * 6, "sa": [0] * 6, "btts": 0, "o15": 0, "o25": 0, "f2": 0, "a2": 0}
+    # xf / xa / nx : xG pour et contre, sur les nx matchs où FotMob les fournit
+    return {"n": 0, "gf": 0, "ga": 0, "sf": [0] * 6, "sa": [0] * 6, "btts": 0, "o15": 0, "o25": 0, "f2": 0, "a2": 0,
+            "xf": 0, "xa": 0, "nx": 0}
 
 
 def team_stats(cache, team_ids):
@@ -238,6 +261,11 @@ def team_stats(cache, team_ids):
                 s["o25"] += hg + ag >= 3
                 s["f2"] += own >= 2
                 s["a2"] += opp >= 2
+                if m.get("x"):
+                    xo, xp = m["x"] if side == "home" else m["x"][::-1]
+                    s["xf"] = round(s["xf"] + xo, 2)
+                    s["xa"] = round(s["xa"] + xp, 2)
+                    s["nx"] += 1
                 for minute, is_home, *_ in m["g"]:
                     scored = bool(is_home) == (side == "home")
                     b = bucket(minute)
@@ -520,6 +548,13 @@ def main():
     now = datetime.now(timezone.utc)
     DATA.mkdir(exist_ok=True)
     teams, cache, upcoming, finished = collect_fotmob(now)
+    # Cotes Unibet d'avant-match gardées dans le cache : elles serviront à mesurer la fiabilité de l'avis
+    prev_odds = {}
+    if OUT_FILE.exists():
+        prev_odds = {m["id"]: m["odds"] for m in json.loads(OUT_FILE.read_text()).get("matches", []) if m.get("odds")}
+    for mid, odds in prev_odds.items():
+        if mid in cache:
+            cache[mid]["o"] = odds
     if not cache and not upcoming:
         log("Aucune donnée récupérée : on garde les fichiers existants.")
         sys.exit(1)
@@ -528,6 +563,10 @@ def main():
     stats = team_stats(cache, involved)
     attach_scorers(upcoming, stats, now)
     attach_odds(upcoming, teams, now)
+    # Une fois le match commencé, on fige les dernières cotes d'avant-match (pas les cotes en direct)
+    for m in upcoming:
+        if m["started"] and m["id"] in prev_odds:
+            m["odds"] = prev_odds[m["id"]]
 
     # Résultats récents (score à 90 min) pour régler automatiquement les paris
     limit = now - timedelta(days=RESULTS_DAYS)
