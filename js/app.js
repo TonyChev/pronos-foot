@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610291215";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610291600";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -84,10 +84,11 @@ function renderMatches() {
     }),
   ].join("");
 
-  // Ordre chronologique, toutes compétitions mélangées
+  // Ordre chronologique, toutes compétitions mélangées ; les matchs commencés ou terminés passent en fin de liste
+  const past = (m) => m.started || m.finished || new Date(m.t) <= Date.now();
   const shown = all
     .filter((m) => state.comp === "all" || state.comp === m.c)
-    .sort((x, y) => new Date(x.t) - new Date(y.t) || order.indexOf(x.c) - order.indexOf(y.c));
+    .sort((x, y) => past(x) - past(y) || new Date(x.t) - new Date(y.t) || order.indexOf(x.c) - order.indexOf(y.c));
   if (!shown.length) {
     $("#matches").innerHTML = `<p class="empty">Aucun match ${state.day ? "demain" : "aujourd'hui"} dans tes compétitions.</p>`;
     return;
@@ -706,7 +707,9 @@ function renderBets() {
   const capital = w.deposits - w.withdrawals + w.adjust;
   const growth = capital > 0 ? (w.result / capital) * 100 : null;
 
-  const list = bets.filter((b) => state.betFilter === "all" || (state.betFilter === "pending" ? b.status === "pending" : b.status !== "pending"));
+  // Les paris en cours d'abord, puis les terminés (du plus récent au plus ancien)
+  const list = bets.filter((b) => state.betFilter === "all" || (state.betFilter === "pending" ? b.status === "pending" : b.status !== "pending"))
+    .sort((x, y) => (x.status !== "pending") - (y.status !== "pending"));
 
   view.innerHTML = `${!isConfigured ? `<div class="card small">⚠️ <b>Mode démo</b> : la synchronisation Firebase n'est pas encore configurée, tes paris seront perdus au rechargement de la page (voir README).</div>` : ""}
   <div class="card">
