@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610291130";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610291215";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -31,6 +31,7 @@ const state = {
   betFilter: "pending",
   combos: [],
   combosOpen: false,       // bloc des combinés suggérés replié par défaut
+  reliability: null,       // résultat de « Fiabilité de mes avis », calculé à la demande
   user: null,
 };
 
@@ -243,8 +244,9 @@ const blend = (split, all, g, x) => {
 
 // Fréquence observée cette saison. Pour « équipe +1,5 », on croise l'attaque de l'équipe
 // (matchs où elle a marqué 2 buts ou plus) avec la défense adverse (matchs où l'adversaire en a encaissé 2 ou plus).
-function freq(m, k) {
-  const H = team(m.h).stats.all, A = team(m.a).stats.all;
+function freq(m, k) { return freqStats(team(m.h).stats.all, team(m.a).stats.all, k); }
+
+function freqStats(H, A, k) {
   const n = H.n + A.n;
   if (!n) return 0;
   if (k === "h15") return (H.f2 + A.a2) / n;
@@ -254,8 +256,11 @@ function freq(m, k) {
 
 const atMost = (lambda, k) => [...Array(k + 1).keys()].reduce((s, i) => s + poisson(lambda, i), 0);
 
-function estimate(m) {
-  const H = team(m.h).stats, A = team(m.a).stats;
+function estimate(m) { return estimateFrom(team(m.h).stats, team(m.a).stats, m.odds); }
+
+// Estimation à partir des stats des 2 équipes (saison, domicile, extérieur) et des cotes Unibet éventuelles.
+// Sert aussi à rejouer mes avis sur les matchs passés (rubrique « Fiabilité de mes avis »).
+function estimateFrom(H, A, odds) {
   if (H.all.n < 4 || A.all.n < 4) return null;
   // Buts attendus : attaque de l'un croisée avec la défense de l'autre (loi de Poisson)
   const lh = (blend(H.home, H.all, "gf", "xf") + blend(A.away, A.all, "ga", "xa")) / 2;
@@ -272,8 +277,8 @@ function estimate(m) {
   // que les stats ignorent (compos, forme, enjeu, météo), et les deux avis réunis se trompent moins souvent.
   const est = { lh, la, stats: {} };
   for (const k of ALL_MARKETS) {
-    est.stats[k] = calibrate(k, 0.6 * model[k] + 0.4 * freq(m, k));
-    const u = unibetProb(m.odds?.[k]);
+    est.stats[k] = calibrate(k, 0.6 * model[k] + 0.4 * freqStats(H.all, A.all, k));
+    const u = unibetProb(odds?.[k]);
     est[k] = u === null ? est.stats[k] : (est.stats[k] + u) / 2;
   }
   return est;
@@ -292,8 +297,9 @@ function calibrate(k, p) {
 const UNIBET_MARGIN = 0.95;
 const unibetProb = (odds) => (odds > 1 ? UNIBET_MARGIN / odds : null);
 // Garde-fou : si mes stats sont nettement plus optimistes qu'Unibet, je ne conseille pas le pari
-const doubtful = (m, est, k) => {
-  const u = unibetProb(m.odds?.[k]);
+const doubtful = (m, est, k) => doubtfulOdds(m.odds, est, k);
+const doubtfulOdds = (odds, est, k) => {
+  const u = unibetProb(odds?.[k]);
   return u !== null && est.stats[k] - u > 0.08;
 };
 
@@ -820,7 +826,8 @@ function renderProfile() {
       <b class="${t.type === "withdraw" || t.amount < 0 ? "neg" : "pos"}">${t.type === "withdraw" ? "−" : t.amount > 0 ? "+" : "−"}${fmtEur(Math.abs(t.amount))}</b>
       <button class="rm" data-tx-delete="${t.id}" aria-label="Supprimer">✕</button>
     </div>`).join("") : `<p class="muted small">Aucun mouvement pour l'instant. Commence par créditer ton portefeuille.</p>`}
-  </div>`;
+  </div>
+  ${ownerToolsHTML()}`;
 }
 
 async function addTransaction(type) {
@@ -839,6 +846,113 @@ async function addTransaction(type) {
 }
 
 function renderAccount() { renderWallet(); renderProfile(); }
+
+// ================================================================ Retours pour Claude (profil du propriétaire)
+
+const OWNER = "anthony.chev@gmail.com";
+const isOwner = () => !isConfigured || state.user?.email === OWNER;
+
+function ownerToolsHTML() {
+  if (!isOwner()) return "";
+  return `<div class="card">
+    <h2>Fiabilité de mes avis</h2>
+    <p class="hint">Je rejoue mes avis sur tous les matchs terminés de la saison, chacun avec les seuls matchs joués avant lui,
+      et je compare mes chances annoncées aux vrais résultats.</p>
+    <div id="reliability">${state.reliability ? reliabilityHTML(state.reliability) : `<button class="btn secondary" data-reliability>Calculer la fiabilité</button>`}</div>
+  </div>
+  <div class="card">
+    <h2>Retours pour Claude</h2>
+    <p class="hint">Copie tous tes paris (cotes, mises, sélections, résultats) puis colle-les dans ta conversation avec Claude
+      en écrivant « fais le bilan ».</p>
+    <button class="btn" data-export-bets>Copier mes paris pour Claude</button>
+    <textarea id="export-box" class="export-box" readonly hidden></textarea>
+  </div>`;
+}
+
+const emptyReplayStats = () => ({ n: 0, gf: 0, ga: 0, btts: 0, o15: 0, o25: 0, f2: 0, a2: 0, xf: 0, xa: 0, nx: 0 });
+
+async function computeReliability() {
+  const r = await fetch(`data/cache.json?t=${Date.now()}`);
+  const matches = Object.values((await r.json()).matches).sort((x, y) => (x.t < y.t ? -1 : 1));
+  const stats = new Map();
+  const get = (id) => {
+    if (!stats.has(id)) stats.set(id, { all: emptyReplayStats(), home: emptyReplayStats(), away: emptyReplayStats() });
+    return stats.get(id);
+  };
+  const blank = () => ({ n: 0, won: 0, sumP: 0 });
+  const season = Object.fromEntries(ALL_MARKETS.map((k) => [k, blank()]));
+  const withOdds = Object.fromEntries(ALL_MARKETS.map((k) => [k, blank()]));
+  // Paris simples à cote proche de 2 que j'aurais suggérés (cotes Unibet d'avant-match connues)
+  const singles = { ...blank(), staked: 0, returned: 0 };
+  let replayed = 0, oddsMatches = 0;
+  for (const m of matches) {
+    const hg = m.g.filter((g) => g[1]).length, ag = m.g.length - hg;
+    const H = get(m.h), A = get(m.a);
+    const est = estimateFrom(H, A, m.o);
+    if (est) {
+      replayed++;
+      if (m.o) oddsMatches++;
+      for (const k of ALL_MARKETS) {
+        const won = marketWon(k, [hg, ag]);
+        if (level(est[k], k) === "yes" && !doubtfulOdds(m.o, est, k)) {
+          for (const bucket of m.o ? [season[k], withOdds[k]] : [season[k]]) { bucket.n++; bucket.won += won; bucket.sumP += est[k]; }
+        }
+        const o = m.o?.[k];
+        if (o >= TARGET_ODDS[0] && o <= TARGET_ODDS[1] && est[k] >= 0.5 && !doubtfulOdds(m.o, est, k)) {
+          singles.n++; singles.won += won; singles.sumP += est[k]; singles.staked += 1; singles.returned += won ? o : 0;
+        }
+      }
+    }
+    for (const [side, s, own, opp, x] of [["home", H, hg, ag, m.x], ["away", A, ag, hg, m.x && [m.x[1], m.x[0]]]]) {
+      for (const st of [s.all, s[side]]) {
+        st.n++; st.gf += own; st.ga += opp; st.btts += hg > 0 && ag > 0; st.o15 += hg + ag >= 2; st.o25 += hg + ag >= 3;
+        st.f2 += own >= 2; st.a2 += opp >= 2;
+        if (x) { st.xf += x[0]; st.xa += x[1]; st.nx++; }
+      }
+    }
+  }
+  return { season, withOdds, singles, replayed, oddsMatches, total: matches.length, at: Date.now() };
+}
+
+function reliabilityHTML(r) {
+  const names = { btts: "BTTS", o15: "+1,5 buts", o25: "+2,5 buts", h15: "Domicile +1,5", a15: "Extérieur +1,5" };
+  const rows = (src) => ALL_MARKETS.map((k) => {
+    const b = src[k];
+    return `<div class="t">${names[k]}</div><div class="v">${b.n}</div>
+      <div class="v">${b.n ? `${Math.round((b.sumP / b.n) * 100)}%` : "–"}</div>
+      <div class="v">${b.n ? pctSpan(Math.round((b.won / b.n) * 100)) : "–"}</div>`;
+  }).join("");
+  const table = (src) => `<div class="rel-table"><div class="h" style="text-align:left">« Je miserais »</div><div class="h">Paris</div><div class="h">Annoncé</div><div class="h">Réel</div>${rows(src)}</div>`;
+  const s = r.singles;
+  const roi = s.staked ? ((s.returned - s.staked) / s.staked) * 100 : null;
+  return `<p class="small"><b>Toute la saison</b> · ${r.replayed} matchs rejoués (mes stats seules : les cotes d'avant-match n'étaient pas encore enregistrées)</p>
+    ${table(r.season)}
+    <p class="small" style="margin-top:14px"><b>Avec la cote Unibet d'avant-match</b> · ${r.oddsMatches} matchs depuis le 29 octobre (le vrai test de l'app actuelle)</p>
+    ${r.oddsMatches ? table(r.withOdds) : `<p class="muted small">Pas encore de match terminé avec sa cote enregistrée.</p>`}
+    <p class="small" style="margin-top:14px"><b>Paris simples à cote proche de 2</b> (comme mes suggestions) :
+      ${s.n ? `${s.n} paris, ${pctSpan(Math.round((s.won / s.n) * 100))} gagnés pour ${Math.round((s.sumP / s.n) * 100)}% annoncés ·
+        <b class="${roi >= 0 ? "pos" : "neg"}">${roi >= 0 ? "+" : ""}${Math.round(roi)}%</b> de rentabilité` : "pas encore assez de matchs avec cote."}</p>
+    <p class="hint">« Annoncé » = mes chances moyennes, « Réel » = part des paris gagnés. Les deux doivent être proches.
+      Les buteurs ne sont pas encore rejoués. Calculé le ${new Date(r.at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}.</p>
+    <button class="link-btn" data-reliability>Recalculer</button>`;
+}
+
+// Export texte de tous les paris, à coller dans la conversation avec Claude
+function exportBets() {
+  const lines = state.bets.map((b) => {
+    const st = betStatus(b);
+    return {
+      date: new Date(b.createdAt).toISOString().slice(0, 10), statut: STATUS_LABEL[st], cote: b.odds, mise: b.stake,
+      retour: Math.round(betReturn({ ...b, status: st }) * 100) / 100, force: b.manual || undefined,
+      selections: b.selections.map((s) => ({
+        match: `${s.home} - ${s.away}`, coup_envoi: s.kickoff, score: selectionScore(s)?.join("-") ?? null,
+        paris: s.markets.map((mk) => ({ marche: marketLabel(mk.k, s.home, s.away, mk.name), cote: mk.odds, resultat: marketResult(s, mk) })),
+      })),
+    };
+  });
+  const w = wallet();
+  return `Pronos Foot · export du ${new Date().toLocaleString("fr-FR")} · solde ${fmtEur(w.balance)}\n${JSON.stringify(lines)}`;
+}
 
 // ================================================================ Navigation et événements
 
@@ -893,6 +1007,16 @@ document.addEventListener("click", async (e) => {
   else if (d.openSlip !== undefined) $("#slip-sheet").showModal();
   else if (d.closeSlip !== undefined) $("#slip-sheet").close();
   else if (d.legend !== undefined) $("#legend").showModal();
+  else if (d.reliability !== undefined) {
+    $("#reliability").innerHTML = `<p class="muted small">Calcul en cours…</p>`;
+    computeReliability().then((r) => { state.reliability = r; renderProfile(); })
+      .catch((err) => { console.error(err); $("#reliability").innerHTML = `<p class="neg">Calcul impossible, réessaie.</p>`; });
+  } else if (d.exportBets !== undefined) {
+    const text = exportBets();
+    const box = $("#export-box");
+    navigator.clipboard.writeText(text).then(() => toast("Paris copiés : colle-les dans Claude"))
+      .catch(() => { box.hidden = false; box.value = text; box.select(); toast("Sélectionne le texte et copie-le"); });
+  }
   else if (d.closeLegend !== undefined) $("#legend").close();
   else if (d.tx) addTransaction(d.tx).catch((err) => { console.error(err); toast(`Erreur d'enregistrement (${err.code || err.message})`); });
   else if (d.txDelete) { if (confirm("Supprimer ce mouvement ?")) store.removeTransaction(d.txDelete); }

@@ -430,3 +430,9 @@ body.locked .help-fab, body.auth-pending .help-fab { display: none; }
 .combos .good:not(.pill) { background: none; color: var(--aqua); padding: 0; }
 .wallet.neg { background: none; padding: 4px 6px; color: var(--pink); }
 #stake-warn.neg, .link-btn.neg { background: none; color: var(--bad); padding: 0; }
+
+/* ---------- Fiabilité et retours pour Claude ---------- */
+.rel-table { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; gap: 6px 8px; align-items: center; font-size: 13px; margin-top: 6px; }
+.rel-table .h { font-size: 11px; color: var(--muted); text-align: center; font-weight: 600; }
+.rel-table .v { text-align: center; }
+.export-box { width: 100%; min-height: 120px; margin-top: 10px; font: 12px/1.4 monospace; border: 1.5px solid var(--border); border-radius: 4px; padding: 8px; }
