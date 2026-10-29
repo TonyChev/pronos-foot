@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610291600";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610291610";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -155,6 +155,8 @@ function renderCombos() {
     state.combos.push(c);
     if (state.combos.length === 4) break;
   }
+  // Plus rien à suggérer (tout est déjà parié, ou rien d'assez sûr) : le bloc disparaît
+  if (!state.combos.length) { $("#combos").innerHTML = ""; return; }
   const dayLabel = (iso) => (localDay(new Date(iso)) === days[0] ? "Auj." : "Demain");
   $("#combos").innerHTML = `<details class="card combos" ${state.combosOpen ? "open" : ""}>
     <summary><h2>Mes paris suggérés (${state.combos.length})</h2></summary>
@@ -172,7 +174,7 @@ function renderCombos() {
         <span>${c.legs.length > 1 ? "Tout passe" : "Passe"} : ${pctSpan(Math.round(c.p * 100))} · cote ≈ <b>${fmtOdds(c.odds)}</b></span>
         <button class="chip active" data-combo="${i}">Au bulletin</button>
       </div>
-    </div>`).join("") : `<p class="muted small">Aucun pari assez sûr pour l'instant.</p>`}
+    </div>`).join("") : ""}
   </details>`;
 }
 
