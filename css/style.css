@@ -215,6 +215,7 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 .combos summary h2::after { content: "▾"; color: var(--aqua); font-size: 14px; font-style: normal; }
 .combos[open] summary h2::after { content: "▴"; }
 .combo { border-top: 1px solid #263236; padding: 10px 0 4px; margin-top: 8px; }
+.combo-title { font-family: var(--display); font-weight: 700; text-transform: uppercase; font-style: italic; color: var(--aqua); font-size: 13px; }
 .combo-leg { display: flex; flex-direction: column; gap: 1px; padding: 4px 0 4px 10px; font-size: 13.5px; border-left: 2px solid var(--aqua); margin: 4px 0; }
 .combo-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; font-size: 13.5px; }
 .combo-foot b { font-family: var(--display); font-size: 16px; white-space: nowrap; }

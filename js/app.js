@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610291044";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610291130";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -96,49 +96,81 @@ function renderMatches() {
 
 // ================================================================ Combinés suggérés
 
-const COMBO_MIN = 0.7;
+// Suggestions : paris simples ou combinés (autant de matchs que nécessaire) dont la cote totale est proche de 2.
+// Avec une cote de 2, un pari gagné rembourse un pari perdu : on cherche ceux qui ont le plus de chances de passer.
+const TARGET_ODDS = [1.8, 2.3];
+const MAX_LEGS = 6;
+const MIN_SUGGESTION = 0.45;   // en dessous, le pari perd plus souvent qu'il ne gagne
+
+// Toutes les sélections jouables d'un match : marchés de buts et buteurs, avec mes chances et la cote Unibet
+function matchLegs(m) {
+  const est = estimate(m);
+  if (!est) return [];
+  const home = team(m.h).name, away = team(m.a).name;
+  const legs = ALL_MARKETS.filter((k) => m.odds?.[k] > 1 && !doubtful(m, est, k))
+    .map((k) => ({ m, k, p: est[k], odds: m.odds[k], label: shortLabel(k, home, away) }));
+  for (const side of ["h", "a"]) {
+    for (const p of m.scorers?.[side] || []) {
+      const prob = scorerProb(m, side, p);
+      if (p.o > 1 && p.g > 0 && prob >= SCORER_MIN) legs.push({ m, k: `sc:${p.id}`, p: prob, odds: p.o, label: `${p.n} buteur` });
+    }
+  }
+  return legs;
+}
 
 function renderCombos() {
   const days = [0, 1].map((d) => { const x = new Date(); x.setDate(x.getDate() + d); return localDay(x); });
   // Matchs déjà joués dans un pari en cours : on ne les repropose pas
   const taken = new Set(state.bets.filter((b) => betStatus(b) === "pending").flatMap((b) => b.selections.map((s) => s.matchId)));
-  const picks = state.data.matches
-    .filter((m) => !m.started && !m.finished && new Date(m.t) > Date.now() && days.includes(localDay(new Date(m.t))) && !taken.has(m.id))
-    .map(bestPick)
-    // Combinés : uniquement des sélections « je miserais », validées par le garde-fou Unibet
-    .filter((p) => p && p.lv === "yes");
-  const pairs = [];
-  for (let i = 0; i < picks.length; i++) {
-    for (let j = i + 1; j < picks.length; j++) {
-      pairs.push({ legs: [picks[i], picks[j]].sort((x, y) => new Date(x.m.t) - new Date(y.m.t)), p: picks[i].p * picks[j].p });
+  const matches = state.data.matches
+    .filter((m) => !m.started && !m.finished && new Date(m.t) > Date.now() && days.includes(localDay(new Date(m.t))) && !taken.has(m.id));
+  // « Coût » d'une sélection : chances perdues pour chaque point de cote gagné (plus c'est bas, mieux c'est).
+  // On garde les 2 meilleures sélections de chaque match, puis les 24 meilleures en tout.
+  const cost = (l) => -Math.log(l.p) / Math.log(l.odds);
+  const cands = matches.flatMap((m) => matchLegs(m).filter((l) => l.odds > 1.03).sort((x, y) => cost(x) - cost(y)).slice(0, 2))
+    .sort((x, y) => cost(x) - cost(y)).slice(0, 24);
+  // Recherche de toutes les combinaisons (un seul pari par match) dont la cote totale tombe près de 2
+  const found = [];
+  const explore = (start, legs, odds, p) => {
+    if (odds >= TARGET_ODDS[0] && odds <= TARGET_ODDS[1] && p >= MIN_SUGGESTION) found.push({ legs: [...legs], odds, p });
+    if (legs.length === MAX_LEGS || odds >= TARGET_ODDS[1]) return;
+    for (let i = start; i < cands.length; i++) {
+      const l = cands[i];
+      if (legs.some((x) => x.m.id === l.m.id) || odds * l.odds > TARGET_ODDS[1] || p * l.p < MIN_SUGGESTION) continue;
+      legs.push(l);
+      explore(i + 1, legs, odds * l.odds, p * l.p);
+      legs.pop();
     }
-  }
-  // Les plus sûrs d'abord, chaque match n'apparaît que dans une seule suggestion
+  };
+  explore(0, [], 1, 1);
+  // Les plus sûres d'abord ; chaque match n'apparaît que dans une seule suggestion
   const used = new Set();
   state.combos = [];
-  // Les 2 sélections doivent passer ensemble au moins 7 fois sur 10
-  for (const c of pairs.filter((x) => x.p >= COMBO_MIN).sort((x, y) => y.p - x.p)) {
+  for (const c of found.sort((x, y) => y.p - x.p || Math.abs(x.odds - 2) - Math.abs(y.odds - 2))) {
     if (c.legs.some((l) => used.has(l.m.id))) continue;
     c.legs.forEach((l) => used.add(l.m.id));
+    c.legs.sort((x, y) => new Date(x.m.t) - new Date(y.m.t));
     state.combos.push(c);
     if (state.combos.length === 4) break;
   }
   const dayLabel = (iso) => (localDay(new Date(iso)) === days[0] ? "Auj." : "Demain");
   $("#combos").innerHTML = `<details class="card combos" ${state.combosOpen ? "open" : ""}>
-    <summary><h2>Mes combinés suggérés (${state.combos.length})</h2></summary>
-    <p class="hint">Combinés de 2 matchs d'aujourd'hui et de demain, classés par chances que les 2 sélections passent.
-      Uniquement des sélections « je miserais » sur lesquelles Unibet est d'accord, et des combinés qui passent au moins 7 fois sur 10 ; les matchs déjà dans un pari en cours sont exclus.</p>
+    <summary><h2>Mes paris suggérés (${state.combos.length})</h2></summary>
+    <p class="hint">Paris simples ou combinés d'aujourd'hui et de demain dont la cote totale est proche de 2 (entre 1,80 et 2,30) :
+      un pari gagné compense un pari perdu. Classés par chances de passer. Marchés de buts et buteurs, sans les paris
+      sur lesquels Unibet est bien moins confiant que moi ; les matchs déjà dans un pari en cours sont exclus.</p>
     ${state.combos.length ? state.combos.map((c, i) => `<div class="combo">
+      <div class="combo-title">${c.legs.length > 1 ? `Combiné × ${c.legs.length}` : "Pari simple"}</div>
       ${c.legs.map((l) => `<div class="combo-leg">
         <span class="muted small">${dayLabel(l.m.t)} ${fmtTime(l.m.t)} · ${comp(l.m.c).flag} ${esc(comp(l.m.c).name)}</span>
         <span><b>${esc(team(l.m.h).name)} – ${esc(team(l.m.a).name)}</b></span>
-        <span>${esc(shortLabel(l.k, team(l.m.h).name, team(l.m.a).name))} · ${pctSpan(Math.round(l.p * 100))} · cote ${fmtOdds(l.odds)}</span>
+        <span>${esc(l.label)} · ${pctSpan(Math.round(l.p * 100))} · cote ${fmtOdds(l.odds)}</span>
       </div>`).join("")}
       <div class="combo-foot">
-        <span>Les 2 passent : ${pctSpan(Math.round(c.p * 100))} · cote ≈ <b>${fmtOdds(c.legs[0].odds * c.legs[1].odds)}</b></span>
+        <span>${c.legs.length > 1 ? "Tout passe" : "Passe"} : ${pctSpan(Math.round(c.p * 100))} · cote ≈ <b>${fmtOdds(c.odds)}</b></span>
         <button class="chip active" data-combo="${i}">Au bulletin</button>
       </div>
-    </div>`).join("") : `<p class="muted small">Aucun match assez sûr pour l'instant.</p>`}
+    </div>`).join("") : `<p class="muted small">Aucun pari assez sûr pour l'instant.</p>`}
   </details>`;
 }
 
@@ -280,15 +312,6 @@ const marketLevel = (m, est, k) => {
 // Marge au-dessus du seuil « je miserais » : sert à choisir le marché le plus convaincant
 // (un marché douteux passe derrière les autres)
 const margin = (est, k, m) => est[k] - YES(k) - (m && doubtful(m, est, k) ? 1 : 0);
-
-// Marché le plus convaincant d'un match parmi ceux qui ont une cote Unibet
-function bestPick(m) {
-  const est = estimate(m);
-  if (!est) return null;
-  // Pour un combiné, on prend le marché « je miserais » qui a le plus de chances de passer
-  const k = ALL_MARKETS.filter((x) => m.odds?.[x] && marketLevel(m, est, x) === "yes").sort((x, y) => est[y] - est[x])[0];
-  return k ? { m, k, p: est[k], odds: m.odds[k], lv: "yes" } : null;
-}
 
 function verdictHTML(m) {
   const est = estimate(m);
@@ -861,7 +884,7 @@ document.addEventListener("click", async (e) => {
     c.legs.forEach((l) => state.slip.set(l.m.id, new Set([l.k])));
     state.slipOdds = null;
     renderSlip(); renderMatches(); $("#slip-sheet").showModal();
-    toast("Combiné ajouté au bulletin");
+    toast(c.legs.length > 1 ? "Combiné ajouté au bulletin" : "Pari ajouté au bulletin");
   } else if (t.id === "clear-slip") {
     state.slip.clear(); state.slipOdds = null; renderSlip(); renderMatches();
   } else if (t.id === "save-bet") saveBet();
