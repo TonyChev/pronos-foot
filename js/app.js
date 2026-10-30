@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610291610";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610301440";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -9,7 +9,9 @@ const SHORT = { btts: "BTTS", o15: "+1,5 buts", o25: "+2,5 buts" };
 // Paris buteur : clé « sc:<id du joueur FotMob> », le nom du joueur est gardé dans la sélection
 const isScorer = (k) => String(k).startsWith("sc:");
 const scorerId = (k) => Number(String(k).slice(3));
-const marketLabel = (k, home, away, name) => (isScorer(k) ? `${name || "Joueur"} buteur`
+// Cotes boostées : clé « cb:<id Unibet> », texte du pari gardé dans la sélection, réglées à la main
+const isBoost = (k) => String(k).startsWith("cb:");
+const marketLabel = (k, home, away, name) => (isBoost(k) ? name : isScorer(k) ? `${name || "Joueur"} buteur`
   : MARKETS[k] ?? `${k === "h15" ? home : away} : plus de 1,5 buts`);
 const shortLabel = (k, home, away) => SHORT[k] ?? `${k === "h15" ? home : away} +1,5`;
 const KAMBI = "https://eu-offering-api.kambicdn.com/offering/v2018/ub";
@@ -70,6 +72,7 @@ function dayMatches() {
 
 function renderMatches() {
   renderCombos();
+  renderBoosts();
   const all = dayMatches();
   const order = state.data.competitions.map((c) => c.id);
   const present = order.filter((id) => all.some((m) => m.c === id));
@@ -176,6 +179,67 @@ function renderCombos() {
       </div>
     </div>`).join("") : ""}
   </details>`;
+}
+
+// Valeur d'une cote boostée : la marge d'Unibet s'accumule à chaque condition du pari et pèse plus sur un joueur
+const BOOST_MARGIN = 0.95;
+const BOOST_PLAYER_MARGIN = 0.85;
+const BOOST_GOOD = 0.08;
+
+function boostValue(b) {
+  const each = b.text.match(/chacun des (\d+)/i);
+  const legs = each ? Number(each[1]) : 1 + (b.text.match(/\bet\b/gi) || []).length;
+  const player = /\b[A-ZÀ-Ý]\.\s?[A-ZÀ-Ý]/.test(b.text);
+  const p = BOOST_MARGIN ** (player ? legs - 1 : legs) * (player ? BOOST_PLAYER_MARGIN : 1) / b.before;
+  const edge = b.after * p - 1;
+  return { p, edge, level: edge >= BOOST_GOOD ? "yes" : edge >= 0 ? "maybe" : "no" };
+}
+
+const BOOST_LABEL = { yes: "Intéressant", maybe: "Correct", no: "À éviter" };
+
+function renderBoosts() {
+  const now = Date.now();
+  const taken = new Set(state.bets.flatMap((b) => b.selections.map((s) => s.matchId)));
+  const boosts = (state.data?.boosts || []).filter((b) => new Date(b.t) > now && !taken.has(`cb:${b.id}`))
+    .map((b) => ({ ...b, ...boostValue(b) })).sort((x, y) => y.edge - x.edge);
+  if (!boosts.length) { $("#boosts").innerHTML = ""; return; }
+  $("#boosts").innerHTML = `<details class="card combos boosts" ${state.boostsOpen ? "open" : ""}>
+    <summary><h2>Cotes boostées Unibet (${boosts.length})</h2></summary>
+    <p class="hint">Valeur estimée d'après le boost et la marge habituelle d'Unibet, sans analyse du match.
+      Le règlement se fait à la main dans Mes paris.</p>
+    ${boosts.map((b) => `<div class="combo">
+      <div class="combo-title"><span class="dot ${b.level}"></span> ${BOOST_LABEL[b.level]}</div>
+      <div class="combo-leg">
+        <span class="muted small">${localDay(new Date(b.t)) === localDay(new Date()) ? "Auj." : "Demain"} ${fmtTime(b.t)}</span>
+        <span><b>${esc(b.home)}${b.away ? ` – ${esc(b.away)}` : ""}</b></span>
+        <span>${esc(b.text)}</span>
+      </div>
+      <div class="combo-foot">
+        <span>${fmtOdds(b.before)} → <b>${fmtOdds(b.after)}</b> · chances ≈ ${Math.round(b.p * 100)} % · valeur ${b.edge >= 0 ? "+" : "−"}${Math.abs(Math.round(b.edge * 100))} %</span>
+        <button class="chip active" data-boost="${b.id}">J'ai parié</button>
+      </div>
+    </div>`).join("")}
+  </details>`;
+}
+
+async function saveBoost(id) {
+  const b = state.data.boosts.find((x) => String(x.id) === id);
+  const stake = parseNum(prompt(`Mise sur cette cote boostée à ${fmtOdds(b.after)} (max ${b.max} €) :`) ?? "");
+  if (!(stake > 0)) return;
+  try {
+    await store.add({
+      odds: b.after, stake, manual: null,
+      selections: [{
+        matchId: `cb:${b.id}`, kickoff: b.t, home: b.home, away: b.away,
+        markets: [{ k: `cb:${b.id}`, name: b.text, odds: b.after }], score: null,
+      }],
+    });
+    renderMatches();
+    toast("Pari enregistré ✔");
+  } catch (e) {
+    console.error(e);
+    toast(`Erreur d'enregistrement (${e.code || e.message})`);
+  }
 }
 
 function matchCard(m) {
@@ -744,7 +808,7 @@ function betCard(b) {
     ${b.selections.map((s) => {
       const sc = selectionScore(s);
       return `<div class="sel"><div>
-        <div class="sel-title">${esc(s.home)} – ${esc(s.away)} ${sc ? `<span class="muted">(${sc[0]}-${sc[1]})</span>` : ""}</div>
+        <div class="sel-title">${esc(s.home)}${s.away ? ` – ${esc(s.away)}` : ""} ${sc ? `<span class="muted">(${sc[0]}-${sc[1]})</span>` : ""}</div>
         <div class="muted small">${fmtDate(s.kickoff)} ${fmtTime(s.kickoff)}</div>
         <div class="sel-markets">${s.markets.map((mk) => {
           const r = marketResult(s, mk);
@@ -758,7 +822,7 @@ function betCard(b) {
     </div>
     <div class="bet-foot">
       <select data-manual="${b.id}" aria-label="Statut">
-        <option value="">Statut automatique</option>
+        <option value="">${b.selections.some((s) => s.markets.some((mk) => isBoost(mk.k))) ? "À régler à la main" : "Statut automatique"}</option>
         ${["won", "lost", "void"].map((s) => `<option value="${s}" ${b.manual === s ? "selected" : ""}>Forcer : ${STATUS_LABEL[s]}</option>`).join("")}
       </select>
       <button class="link-btn" data-delete="${b.id}">Supprimer</button>
@@ -1004,6 +1068,8 @@ document.addEventListener("click", async (e) => {
     state.slipOdds = null;
     renderSlip(); renderMatches(); $("#slip-sheet").showModal();
     toast(c.legs.length > 1 ? "Combiné ajouté au bulletin" : "Pari ajouté au bulletin");
+  } else if (d.boost !== undefined) {
+    saveBoost(d.boost);
   } else if (t.id === "clear-slip") {
     state.slip.clear(); state.slipOdds = null; renderSlip(); renderMatches();
   } else if (t.id === "save-bet") saveBet();
@@ -1045,7 +1111,8 @@ document.addEventListener("input", (e) => {
 });
 
 document.addEventListener("toggle", (e) => {
-  if (e.target.classList?.contains("combos")) state.combosOpen = e.target.open;
+  if (e.target.classList?.contains("boosts")) state.boostsOpen = e.target.open;
+  else if (e.target.classList?.contains("combos")) state.combosOpen = e.target.open;
 }, true);
 
 document.addEventListener("change", (e) => {

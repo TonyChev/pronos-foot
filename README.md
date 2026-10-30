@@ -82,3 +82,7 @@ L'app en déduit ses chances de marquer s'il est titulaire, ajustées à la déf
 à la cote Unibet « buteur » (★ = cote plus généreuse que l'estimation). Seuls 3 joueurs par équipe au plus
 sont proposés : ceux qui ont déjà marqué et ont au moins 25 % de chances. Un pari buteur est gagné si le joueur
 marque (hors contre son camp) et remboursé s'il n'entre pas en jeu.
+
+## Cotes boostées
+
+Les offres foot de unibet.fr/cotes-boostees sont relevées à chaque mise à jour. Chaque offre est jugée sur le boost et une marge estimée, sans analyse du match. Ces paris se règlent à la main dans « Mes paris ».

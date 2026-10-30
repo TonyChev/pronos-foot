@@ -58,6 +58,9 @@ COMPETITIONS = [
 FOTMOB = "https://www.fotmob.com/api/data"
 KAMBI = "https://eu-offering-api.kambicdn.com/offering/v2018/ub"
 KAMBI_PARAMS = "lang=fr_FR&market=FR"
+BOOST_PAGE = "https://www.unibet.fr/cotes-boostees"
+BROWSER_UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+BOOST_TERMS = re.compile(r"\s*\(([\d,.]+)\s*->\s*([\d,.]+)\s*/\s*Mise max (\d+)[^)]*\)")
 FOOTBALL_GROUP = 1000093190
 
 # Fenêtre des matchs à venir publiés (l'app n'affiche qu'aujourd'hui et demain,
@@ -94,6 +97,42 @@ def get_json(url, retries=3):
                 log(f"  échec {url}: {e}")
                 return None
             time.sleep(2 * (attempt + 1))
+
+
+def get_boosts():
+    """Cotes boostées foot du site Unibet France (état embarqué dans la page) ; liste vide si indisponible."""
+    try:
+        req = urllib.request.Request(BOOST_PAGE, headers={"User-Agent": BROWSER_UA, "Accept-Encoding": "gzip"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            body = r.read()
+            if r.headers.get("Content-Encoding") == "gzip":
+                body = gzip.decompress(body)
+        state = re.search(r'<script[^>]*id="serverApp-state"[^>]*>(.*?)</script>', body.decode("utf8"), re.S)
+        events = json.loads(state.group(1))["BoostedBets"]["events"]
+    except Exception as e:  # noqa: BLE001
+        log(f"  cotes boostées indisponibles : {e}")
+        return []
+    boosts = []
+    for e in events:
+        if e.get("sportCode") != "FOOT" or not e.get("parsedStart"):
+            continue
+        for group in e.get("groupedMarkets", []):
+            for mk in group.get("markets", []):
+                terms = BOOST_TERMS.search(mk.get("description", ""))
+                outcome = next((o for o in mk.get("outcomes", []) if not o.get("hidden")), None)
+                if not terms or not outcome or mk.get("suspended") or outcome.get("suspended"):
+                    continue
+                boosts.append({
+                    "id": mk["id"], "t": e["parsedStart"],
+                    "home": (e.get("opponentA") or {}).get("label") or e.get("description", ""),
+                    "away": (e.get("opponentB") or {}).get("label") or "",
+                    "text": BOOST_TERMS.sub("", mk["description"]).removeprefix("CB - ").strip(),
+                    "before": float(terms.group(1).replace(",", ".")),
+                    "after": float(outcome["price"].replace(",", ".")),
+                    "max": int(terms.group(3)),
+                })
+    log(f"Cotes boostées foot : {len(boosts)}")
+    return boosts
 
 
 def parse_utc(s):
@@ -583,6 +622,7 @@ def main():
         "teams": {tid: {"name": teams[tid], "stats": stats[tid]} for tid in involved},
         "results": results,
         "scorers": scorers,
+        "boosts": get_boosts(),
     }
     OUT_FILE.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")))
     CACHE_FILE.write_text(json.dumps({"matches": cache}, separators=(",", ":")))
