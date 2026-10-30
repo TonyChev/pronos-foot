@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610301535";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610301600";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -429,12 +429,15 @@ const scorerOf = (m, k) => [...(m.scorers?.h || []), ...(m.scorers?.a || [])].fi
 // Le lissage vers la moyenne du poste tire les meilleurs buteurs vers le bas : recalage de 1,1.
 const SCORER_CALIBRATION = 1.1;
 const SCORER_MIN = 0.25;  // en dessous de 25 % de chances, le joueur n'est pas proposé
+const SCORER_MARGIN = 0.8; // marge estimée d'Unibet sur le marché buteur
 function scorerProb(m, side, p) {
   const s = team(side === "h" ? m.h : m.a).stats.all;
   const avg = s.n ? s.gf / s.n : 0;
   const est = estimate(m);
   const adj = est && avg ? Math.min(1.6, Math.max(0.6, (side === "h" ? est.lh : est.la) / avg)) : 1;
-  return 1 - Math.exp(-p.r * (p.min / 90) * adj * SCORER_CALIBRATION);
+  const stats = 1 - Math.exp(-p.r * (p.min / 90) * adj * SCORER_CALIBRATION);
+  // Comme pour les marchés de buts : moitié mes stats, moitié Unibet (un joueur à 3 buts en 4 matchs fausse les stats seules)
+  return p.o > 1 ? (stats + SCORER_MARGIN / p.o) / 2 : stats;
 }
 
 const WHY = { injury: "blessé", suspension: "suspendu", international: "en sélection" };
