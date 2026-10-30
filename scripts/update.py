@@ -59,7 +59,20 @@ FOTMOB = "https://www.fotmob.com/api/data"
 KAMBI = "https://eu-offering-api.kambicdn.com/offering/v2018/ub"
 KAMBI_PARAMS = "lang=fr_FR&market=FR"
 BOOST_PAGE = "https://www.unibet.fr/cotes-boostees"
-BROWSER_UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+SITE = "https://www.unibet.fr/paris-football"
+UA = "Mozilla/5.0 (pronos-foot)"
+# Pages publiques des compétitions (robots.txt n'autorise que ces pages, pas les API du site)
+SITE_PATHS = {
+    53: "france/ligue-1-mcdonalds", 47: "angleterre/premier-league", 87: "espagne/laliga", 54: "allemagne/bundesliga-1",
+    55: "italie/serie-a", 38: "autriche/d1-autriche", 40: "belgique/d1-belgique", 46: "danemark/d1-danemark",
+    64: "ecosse/d1-ecosse", 130: "etats-unis/mls", 51: "finlande/d1-finlande", 223: "japon/d1-japon",
+    59: "norvege/d1-norvege", 57: "pays-bas/d1-pays-bas", 61: "portugal/liga-portugal", 67: "suede/d1-suede",
+    69: "suisse/d1-suisse", 42: "coupes-d-europe/ligue-des-champions",
+    73: "coupes-d-europe/ligue-europa", 10216: "coupes-d-europe/ligue-conference",
+}
+SITE_NEAR = 6      # heures avant le coup d'envoi : relevé à chaque passage
+SITE_EVERY = 4     # heures entre deux relevés pour les matchs plus lointains
+SITE_PAUSE = 1     # secondes entre deux pages, pour ne pas charger le site
 BOOST_TERMS = re.compile(r"\s*\(([\d,.]+)\s*->\s*([\d,.]+)\s*/\s*Mise max (\d+)[^)]*\)")
 FOOTBALL_GROUP = 1000093190
 
@@ -99,16 +112,24 @@ def get_json(url, retries=3):
             time.sleep(2 * (attempt + 1))
 
 
+def get_html(url):
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Encoding": "gzip"})
+    with urllib.request.urlopen(req, timeout=40) as r:
+        body = r.read()
+        if r.headers.get("Content-Encoding") == "gzip":
+            body = gzip.decompress(body)
+    return body.decode("utf8")
+
+
+def page_state(html):
+    """Données embarquées dans une page publique du site Unibet."""
+    return json.loads(re.search(r'<script[^>]*id="serverApp-state"[^>]*>(.*?)</script>', html, re.S).group(1))
+
+
 def get_boosts():
     """Cotes boostées foot du site Unibet France (état embarqué dans la page) ; liste vide si indisponible."""
     try:
-        req = urllib.request.Request(BOOST_PAGE, headers={"User-Agent": BROWSER_UA, "Accept-Encoding": "gzip"})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            body = r.read()
-            if r.headers.get("Content-Encoding") == "gzip":
-                body = gzip.decompress(body)
-        state = re.search(r'<script[^>]*id="serverApp-state"[^>]*>(.*?)</script>', body.decode("utf8"), re.S)
-        events = json.loads(state.group(1))["BoostedBets"]["events"]
+        events = page_state(get_html(BOOST_PAGE))["BoostedBets"]["events"]
     except Exception as e:  # noqa: BLE001
         log(f"  cotes boostées indisponibles : {e}")
         return []
@@ -576,6 +597,135 @@ def attach_odds(upcoming, teams, now):
     log(f"Cotes : {matched}/{len(upcoming)} matchs associés à Unibet")
 
 
+# ---------------------------------------------------------------- Site Unibet France
+# Les cotes de ce site sont celles qu'on peut réellement jouer ; elles diffèrent du flux Kambi
+
+def site_links(comp_id):
+    """(chemin, équipe domicile, équipe extérieur) des matchs affichés sur la page d'une compétition."""
+    path = SITE_PATHS[comp_id]
+    html = get_html(f"{SITE}/{path}")
+    links = []
+    for href in sorted(set(re.findall(rf'href="(/paris-football/{re.escape(path)}/\d+/[^"]+-vs-[^"]+)"', html))):
+        home, away = href.rsplit("/", 1)[1].split("-vs-", 1)
+        links.append((href, home.replace("-", " "), away.replace("-", " ")))
+    return links
+
+
+def site_start(state):
+    """Coup d'envoi du match d'une page, pour vérifier qu'on a le bon match."""
+    if isinstance(state, dict):
+        if state.get("parsedStart"):
+            return state["parsedStart"]
+        state = list(state.values())
+    if isinstance(state, list):
+        for v in state:
+            start = site_start(v)
+            if start:
+                return start
+    return None
+
+
+def site_markets(state):
+    """Marchés du temps réglementaire d'une page de match, par intitulé."""
+    markets = {}
+
+    def walk(o):
+        if isinstance(o, dict):
+            if "outcomes" in o and "description" in o and o.get("period", "90 Mins") == "90 Mins":
+                markets.setdefault(o["description"], o)
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+
+    walk(state)
+    return markets
+
+
+def site_price(market, label):
+    for o in (market or {}).get("outcomes", []):
+        if o.get("description", "").replace(",", ".") == label and not o.get("hidden") and not o.get("suspended"):
+            return float(o["price"].replace(",", "."))
+    return None
+
+
+def extract_site_odds(markets, home, away):
+    odds = {
+        "btts": site_price(markets.get("Les 2 équipes marquent"), "Oui"),
+        "o15": site_price(markets.get("Plus / Moins 1.5 But(s)"), "Plus 1.5"),
+        "o25": site_price(markets.get("Plus / Moins 2.5 But(s)"), "Plus 2.5"),
+    }
+    for name, market in markets.items():
+        team = re.fullmatch(r"Plus / Moins But\(s\) - (.+) 1,5", name)
+        if team:
+            key = "h15" if similarity(team.group(1), home) >= similarity(team.group(1), away) else "a15"
+            odds[key] = site_price(market, "Plus 1.5")
+    return {k: v for k, v in odds.items() if v}
+
+
+def attach_site_scorer_odds(m, market):
+    sc = m.get("scorers")
+    outcomes = [o for o in (market or {}).get("outcomes", []) if not o.get("hidden") and not o.get("suspended")]
+    if not sc or not outcomes:
+        return
+    for p in sc["h"] + sc["a"]:
+        p.pop("kn", None)
+        p.pop("o", None)
+        hit = next((o for o in outcomes if same_player(p["n"], o["description"].replace(",", " "))), None)
+        if hit:
+            p["kn"], p["o"] = hit["description"], float(hit["price"].replace(",", "."))
+
+
+def attach_site_odds(upcoming, teams, now, previous):
+    """Remplace les cotes du flux par celles du site ; un match introuvable garde les cotes du flux."""
+    links = {}
+    done = reused = 0
+    for m in upcoming:
+        if m["started"] or m["finished"] or m["c"] not in SITE_PATHS:
+            continue
+        old = previous.get(m["id"], {})
+        near = parse_utc(m["t"]) - now <= timedelta(hours=SITE_NEAR)
+        fresh = old.get("oddsAt") and now - parse_utc(old["oddsAt"]) < timedelta(hours=SITE_EVERY)
+        if fresh and not near:
+            m["odds"], m["oddsAt"], m["oddsSrc"] = old["odds"], old["oddsAt"], "site"
+            kept = {p["id"]: p for side in ("h", "a") for p in (old.get("scorers") or {}).get(side, [])}
+            for p in ((m.get("scorers") or {}).get("h", []) + (m.get("scorers") or {}).get("a", [])):
+                p.pop("kn", None)
+                p.pop("o", None)
+                if kept.get(p["id"], {}).get("o"):
+                    p["kn"], p["o"] = kept[p["id"]].get("kn"), kept[p["id"]]["o"]
+            reused += 1
+            continue
+        try:
+            if m["c"] not in links:
+                links[m["c"]] = site_links(m["c"])
+                time.sleep(SITE_PAUSE)
+            home, away = teams[m["h"]], teams[m["a"]]
+            best = max(links[m["c"]], key=lambda l: similarity(home, l[1]) + similarity(away, l[2]), default=None)
+            if not best:
+                continue
+            sh, sa = similarity(home, best[1]), similarity(away, best[2])
+            # Un seul côté reconnu suffit (« Mainz 05 » / « Mayence ») : le coup d'envoi vérifié ensuite tranche
+            if not ((min(sh, sa) >= 0.45 and sh + sa >= 1.2) or max(sh, sa) >= 0.9):
+                continue
+            state = page_state(get_html(f"https://www.unibet.fr{best[0]}"))
+            time.sleep(SITE_PAUSE)
+            start = site_start(state)
+            if not start or abs((parse_utc(start) - parse_utc(m["t"])).total_seconds()) > 3 * 3600:
+                continue
+            markets = site_markets(state)
+        except Exception as e:  # noqa: BLE001
+            log(f"  site Unibet indisponible pour {m['id']} : {e}")
+            continue
+        odds = extract_site_odds(markets, home, away)
+        if odds:
+            m["odds"], m["oddsAt"], m["oddsSrc"] = odds, now.strftime("%Y-%m-%dT%H:%M:%SZ"), "site"
+            attach_site_scorer_odds(m, markets.get("Buteur"))
+            done += 1
+    log(f"Cotes du site Unibet : {done} matchs relevés, {reused} repris du relevé précédent")
+
+
 # ---------------------------------------------------------------- main
 
 def regulation_score(m):
@@ -588,9 +738,10 @@ def main():
     DATA.mkdir(exist_ok=True)
     teams, cache, upcoming, finished = collect_fotmob(now)
     # Cotes Unibet d'avant-match gardées dans le cache : elles serviront à mesurer la fiabilité de l'avis
-    prev_odds = {}
+    previous = {}
     if OUT_FILE.exists():
-        prev_odds = {m["id"]: m["odds"] for m in json.loads(OUT_FILE.read_text()).get("matches", []) if m.get("odds")}
+        previous = {m["id"]: m for m in json.loads(OUT_FILE.read_text()).get("matches", [])}
+    prev_odds = {mid: m["odds"] for mid, m in previous.items() if m.get("odds")}
     for mid, odds in prev_odds.items():
         if mid in cache:
             cache[mid]["o"] = odds
@@ -602,10 +753,13 @@ def main():
     stats = team_stats(cache, involved)
     attach_scorers(upcoming, stats, now)
     attach_odds(upcoming, teams, now)
+    attach_site_odds(upcoming, teams, now, previous)
     # Une fois le match commencé, on fige les dernières cotes d'avant-match (pas les cotes en direct)
     for m in upcoming:
         if m["started"] and m["id"] in prev_odds:
             m["odds"] = prev_odds[m["id"]]
+            if previous[m["id"]].get("oddsSrc"):
+                m["oddsSrc"] = previous[m["id"]]["oddsSrc"]
 
     # Résultats récents (score à 90 min) pour régler automatiquement les paris
     limit = now - timedelta(days=RESULTS_DAYS)

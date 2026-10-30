@@ -7,7 +7,7 @@ Suivi de pronostics « Les 2 équipes marquent » et « Plus de 2,5 buts », ave
 | Élément | Source / outil | Coût |
 |---|---|---|
 | Matchs, résultats, minutes des buts | FotMob (API publique non officielle) | gratuit |
-| Cotes « Les 2 marquent » et « +2,5 buts » | Kambi, la plateforme de paris d'Unibet | gratuit |
+| Cotes (buts et buteurs) | Pages publiques de unibet.fr, flux Kambi en secours | gratuit |
 | Mise à jour automatique (toutes les heures) | GitHub Actions | gratuit (dépôt public) |
 | Hébergement du site | GitHub Pages | gratuit |
 | Sauvegarde des paris (téléphone + PC) | Firebase Firestore + connexion Google | gratuit (offre Spark) |
@@ -82,6 +82,11 @@ L'app en déduit ses chances de marquer s'il est titulaire, ajustées à la déf
 avec la cote Unibet « buteur » (★ = cote plus généreuse que l'estimation). Seuls 3 joueurs par équipe au plus
 sont proposés : ceux qui ont déjà marqué et ont au moins 25 % de chances. Un pari buteur est gagné si le joueur
 marque (hors contre son camp) et remboursé s'il n'entre pas en jeu.
+
+## Cotes
+
+Les cotes viennent des pages publiques de unibet.fr : à chaque passage pour les matchs des 6 prochaines heures, toutes les
+4 heures pour les autres, une page à la fois. Un match introuvable sur le site garde les cotes du flux Kambi, avec une mention.
 
 ## Cotes boostées
 

@@ -202,6 +202,7 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 .verdict.maybe::before { background: var(--text); }
 .verdict.no::before { background: var(--pink); }
 .verdict.no b { color: var(--bad); }
+.odds-src { margin: 0 12px 6px; font-size: 12px; color: var(--muted, #6b7a80); }
 .verdict .warn { color: var(--bad); font-size: 12px; font-weight: 600; }
 
 /* ---------- Combinés suggérés (bloc vedette) ---------- */

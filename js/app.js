@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610301600";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610301700";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -14,7 +14,6 @@ const isBoost = (k) => String(k).startsWith("cb:");
 const marketLabel = (k, home, away, name) => (isBoost(k) ? name : isScorer(k) ? `${name || "Joueur"} buteur`
   : MARKETS[k] ?? `${k === "h15" ? home : away} : plus de 1,5 buts`);
 const shortLabel = (k, home, away) => SHORT[k] ?? `${k === "h15" ? home : away} +1,5`;
-const KAMBI = "https://eu-offering-api.kambicdn.com/offering/v2018/ub";
 const STATUS_LABEL = { won: "Gagné", lost: "Perdu", pending: "En cours", void: "Remboursé" };
 const TX_LABEL = { deposit: "Crédit", withdraw: "Retrait", adjust: "Correction du solde" };
 
@@ -281,6 +280,7 @@ function matchCard(m) {
       </div>
       <span class="chev">▾</span>
     </button>
+    ${m.odds && m.oddsSrc !== "site" && !locked ? `<p class="odds-src">Cotes du flux international, à vérifier sur Unibet</p>` : ""}
     <div class="odds-row">${MATCH_MARKETS.map(oddBtn).join("")}</div>
     <div class="odds-row team">${TEAM_MARKETS.map(oddBtn).join("")}</div>
     ${locked ? "" : verdictHTML(m)}
@@ -364,7 +364,7 @@ function calibrate(k, p) {
 }
 
 // Chances selon Unibet : inverse de la cote, moins la marge du bookmaker (~5 %)
-const UNIBET_MARGIN = 0.92; // moyenne relevée sur le flux Kambi (0,91 à 0,94), pour BTTS, +1,5 et +2,5
+const UNIBET_MARGIN = 0.88; // relevée sur unibet.fr pour BTTS, +1,5 et +2,5 (0,86 à 0,90 côté « oui », en prenant le flux Kambi comme référence)
 const unibetProb = (odds) => (odds > 1 ? UNIBET_MARGIN / odds : null);
 // Garde-fou : si mes stats sont nettement plus optimistes qu'Unibet, je ne conseille pas le pari
 const doubtful = (m, est, k) => doubtfulOdds(m.odds, est, k);
@@ -527,60 +527,23 @@ function renderUpdated() {
   $("#updated").textContent = `Données mises à jour il y a ${ago} · cotes Unibet · touche un match pour replier ses stats`;
 }
 
-// ================================================================ Cotes en direct (Kambi / Unibet)
+// ================================================================ Cotes
 
-function extractOdds(offers, [homeEn = "", awayEn = ""] = []) {
-  const wanted = {
-    "Both Teams To Score|Yes|": "btts",
-    "Total Goals|Over|1500": "o15",
-    "Total Goals|Over|2500": "o25",
-    [`Total Goals by ${homeEn}|Over|1500`]: "h15",
-    [`Total Goals by ${awayEn}|Over|1500`]: "a15",
-  };
-  const odds = {};
-  for (const b of offers) {
-    for (const o of b.outcomes || []) {
-      if (!o.odds || (o.status && o.status !== "OPEN")) continue;
-      const k = wanted[`${b.criterion?.englishLabel}|${o.englishLabel}|${o.line ?? ""}`];
-      if (k) odds[k] = o.odds / 1000;
-    }
-  }
-  return odds;
-}
-
-function refreshScorerOdds(m, offers) {
-  const cotes = new Map();
-  for (const b of offers) {
-    if (b.criterion?.englishLabel !== "To Score") continue;
-    for (const o of b.outcomes || []) if (o.participant && o.odds && (!o.status || o.status === "OPEN")) cotes.set(o.participant, o.odds / 1000);
-  }
-  for (const p of [...(m.scorers?.h || []), ...(m.scorers?.a || [])]) if (p.kn && cotes.has(p.kn)) p.o = cotes.get(p.kn);
-}
-
+// Le site Unibet n'est pas interrogé depuis le navigateur : on recharge le dernier relevé publié
 async function refreshOdds() {
   const btn = $("#refresh-odds");
-  const todo = dayMatches().filter((m) => m.kambi && !m.started);
-  if (!todo.length) return toast("Aucune cote à actualiser");
   btn.disabled = true;
-  let ok = 0;
-  const queue = [...todo];
-  const worker = async () => {
-    while (queue.length) {
-      const m = queue.shift();
-      try {
-        const r = await fetch(`${KAMBI}/betoffer/event/${m.kambi}.json?lang=fr_FR&market=FR`);
-        if (!r.ok) continue;
-        const offers = (await r.json()).betOffers || [];
-        const odds = extractOdds(offers, m.kteams);
-        if (Object.keys(odds).length) { m.odds = odds; ok++; }
-        refreshScorerOdds(m, offers);
-      } catch { /* réseau : on garde l'ancienne cote */ }
-    }
-  };
-  await Promise.all([worker(), worker(), worker(), worker()]);
+  try {
+    const r = await fetch(`data/matches.json?t=${Date.now()}`);
+    state.data = await r.json();
+    renderUpdated();
+    renderMatches();
+    renderSlip();
+    toast("Dernier relevé des cotes chargé");
+  } catch {
+    toast("Impossible de recharger les cotes");
+  }
   btn.disabled = false;
-  renderMatches();
-  toast(`Cotes actualisées (${ok}/${todo.length} matchs)`);
 }
 
 // ================================================================ Bulletin
