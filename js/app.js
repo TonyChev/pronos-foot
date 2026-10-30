@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610301440";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610301513";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -181,8 +181,10 @@ function renderCombos() {
   </details>`;
 }
 
-// Valeur d'une cote boostée : la marge d'Unibet s'accumule à chaque condition du pari et pèse plus sur un joueur
+// Valeur d'une cote boostée : la marge d'Unibet s'accumule à chaque condition du pari et pèse plus sur un joueur.
+// Les combinaisons sur un seul match ont leur propre marge : 0,78 à 0,83 relevé sur « Résultat et les deux équipes marquent »
 const BOOST_MARGIN = 0.95;
+const BOOST_SAME_MATCH = 0.8;
 const BOOST_PLAYER_MARGIN = 0.85;
 const BOOST_GOOD = 0.08;
 
@@ -190,22 +192,23 @@ function boostValue(b) {
   const each = b.text.match(/chacun des (\d+)/i);
   const legs = each ? Number(each[1]) : 1 + (b.text.match(/\bet\b/gi) || []).length;
   const player = /\b[A-ZÀ-Ý]\.\s?[A-ZÀ-Ý]/.test(b.text);
-  const p = BOOST_MARGIN ** (player ? legs - 1 : legs) * (player ? BOOST_PLAYER_MARGIN : 1) / b.before;
+  const sameMatch = legs > 1 && b.away && !each;
+  const p = (sameMatch ? BOOST_SAME_MATCH : BOOST_MARGIN ** (player ? legs - 1 : legs) * (player ? BOOST_PLAYER_MARGIN : 1)) / b.before;
   const edge = b.after * p - 1;
-  return { p, edge, level: edge >= BOOST_GOOD ? "yes" : edge >= 0 ? "maybe" : "no" };
+  return { p, edge, level: edge >= BOOST_GOOD ? "yes" : "maybe" };
 }
 
-const BOOST_LABEL = { yes: "Intéressant", maybe: "Correct", no: "À éviter" };
+const BOOST_LABEL = { yes: "Intéressant", maybe: "Correct" };
 
 function renderBoosts() {
   const now = Date.now();
   const taken = new Set(state.bets.flatMap((b) => b.selections.map((s) => s.matchId)));
   const boosts = (state.data?.boosts || []).filter((b) => new Date(b.t) > now && !taken.has(`cb:${b.id}`))
-    .map((b) => ({ ...b, ...boostValue(b) })).sort((x, y) => y.edge - x.edge);
+    .map((b) => ({ ...b, ...boostValue(b) })).filter((b) => b.edge >= 0).sort((x, y) => y.edge - x.edge);
   if (!boosts.length) { $("#boosts").innerHTML = ""; return; }
   $("#boosts").innerHTML = `<details class="card combos boosts" ${state.boostsOpen ? "open" : ""}>
     <summary><h2>Cotes boostées Unibet (${boosts.length})</h2></summary>
-    <p class="hint">Valeur estimée d'après le boost et la marge habituelle d'Unibet, sans analyse du match.
+    <p class="hint">Seules les offres à valeur positive sont affichées. Valeur estimée d'après le boost et la marge habituelle d'Unibet, sans analyse du match.
       Le règlement se fait à la main dans Mes paris.</p>
     ${boosts.map((b) => `<div class="combo">
       <div class="combo-title"><span class="dot ${b.level}"></span> ${BOOST_LABEL[b.level]}</div>
@@ -215,7 +218,7 @@ function renderBoosts() {
         <span>${esc(b.text)}</span>
       </div>
       <div class="combo-foot">
-        <span>${fmtOdds(b.before)} → <b>${fmtOdds(b.after)}</b> · chances ≈ ${Math.round(b.p * 100)} % · valeur ${b.edge >= 0 ? "+" : "−"}${Math.abs(Math.round(b.edge * 100))} %</span>
+        <span>${fmtOdds(b.before)} → <b>${fmtOdds(b.after)}</b> · chances ≈ ${Math.round(b.p * 100)} % · valeur +${Math.round(b.edge * 100)} %</span>
         <button class="chip active" data-boost="${b.id}">J'ai parié</button>
       </div>
     </div>`).join("")}

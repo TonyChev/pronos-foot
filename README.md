@@ -85,4 +85,4 @@ marque (hors contre son camp) et remboursé s'il n'entre pas en jeu.
 
 ## Cotes boostées
 
-Les offres foot de unibet.fr/cotes-boostees sont relevées à chaque mise à jour. Chaque offre est jugée sur le boost et une marge estimée, sans analyse du match. Ces paris se règlent à la main dans « Mes paris ».
+Les offres foot de unibet.fr/cotes-boostees sont relevées à chaque mise à jour. Chaque offre est jugée sur le boost et une marge estimée, sans analyse du match, et seules celles à valeur positive sont affichées. Ces paris se règlent à la main dans « Mes paris ».
