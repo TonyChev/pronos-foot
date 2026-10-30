@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610301513";
+import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610301535";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -132,7 +132,7 @@ function renderCombos() {
   // « Coût » d'une sélection : chances perdues pour chaque point de cote gagné (plus c'est bas, mieux c'est).
   // On garde les 2 meilleures sélections de chaque match, puis les 24 meilleures en tout.
   const cost = (l) => -Math.log(l.p) / Math.log(l.odds);
-  const cands = matches.flatMap((m) => matchLegs(m).filter((l) => l.odds > 1.03).sort((x, y) => cost(x) - cost(y)).slice(0, 2))
+  const cands = matches.flatMap((m) => matchLegs(m).filter((l) => l.odds > 1.03 && l.odds <= TARGET_ODDS[1]).sort((x, y) => cost(x) - cost(y)).slice(0, 2))
     .sort((x, y) => cost(x) - cost(y)).slice(0, 24);
   // Recherche de toutes les combinaisons (un seul pari par match) dont la cote totale tombe près de 2
   const found = [];
@@ -183,9 +183,9 @@ function renderCombos() {
 
 // Valeur d'une cote boostée : la marge d'Unibet s'accumule à chaque condition du pari et pèse plus sur un joueur.
 // Les combinaisons sur un seul match ont leur propre marge : 0,78 à 0,83 relevé sur « Résultat et les deux équipes marquent »
-const BOOST_MARGIN = 0.95;
+const BOOST_MARGIN = 0.86; // moyenne relevée sur unibet.fr (0,83 à 0,89), dont les cotes sont plus basses que le flux
 const BOOST_SAME_MATCH = 0.8;
-const BOOST_PLAYER_MARGIN = 0.85;
+const BOOST_PLAYER_MARGIN = 0.8;
 const BOOST_GOOD = 0.08;
 
 function boostValue(b) {
@@ -364,7 +364,7 @@ function calibrate(k, p) {
 }
 
 // Chances selon Unibet : inverse de la cote, moins la marge du bookmaker (~5 %)
-const UNIBET_MARGIN = 0.95;
+const UNIBET_MARGIN = 0.92; // moyenne relevée sur le flux Kambi (0,91 à 0,94), pour BTTS, +1,5 et +2,5
 const unibetProb = (odds) => (odds > 1 ? UNIBET_MARGIN / odds : null);
 // Garde-fou : si mes stats sont nettement plus optimistes qu'Unibet, je ne conseille pas le pari
 const doubtful = (m, est, k) => doubtfulOdds(m.odds, est, k);
