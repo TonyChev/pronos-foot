@@ -1,6 +1,6 @@
 // Stockage des paris et des mouvements du portefeuille :
 // Firestore (synchronisé entre appareils) ou, à défaut, en mémoire (mode démo).
-import { firebaseConfig } from "./firebase-config.js?v=202610301700";
+import { firebaseConfig } from "./firebase-config.js?v=202611021500";
 
 const FB = "https://www.gstatic.com/firebasejs/10.12.2";
 const COLLECTIONS = ["bets", "transactions"];
@@ -9,25 +9,30 @@ export const isConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.proj
 
 const listeners = Object.fromEntries(COLLECTIONS.map((c) => [c, []]));
 const userListeners = [];
+const settingsListeners = [];
 let api = null;
 
 function emit(name, docs) { listeners[name].forEach((fn) => fn(docs)); }
 function emitUser(user) { userListeners.forEach((fn) => fn(user)); }
+function emitSettings(s) { settingsListeners.forEach((fn) => fn(s)); }
 
 export function onBets(fn) { listeners.bets.push(fn); }
 export function onTransactions(fn) { listeners.transactions.push(fn); }
 export function onUser(fn) { userListeners.push(fn); }
+export function onSettings(fn) { settingsListeners.push(fn); }
 
 // ---------------------------------------------------------------- mode démo
 function memoryStore() {
   const data = Object.fromEntries(COLLECTIONS.map((c) => [c, []]));
   let n = 0;
+  let settings = {};
   const publish = (name) => emit(name, [...data[name]].sort((a, b) => b.createdAt - a.createdAt));
   setTimeout(() => { emitUser({ demo: true, displayName: "Mode démo" }); COLLECTIONS.forEach(publish); });
   return {
     async add(name, doc) { data[name].push({ ...doc, id: `demo-${++n}`, createdAt: Date.now() }); publish(name); },
     async update(name, id, patch) { data[name] = data[name].map((d) => (d.id === id ? { ...d, ...patch } : d)); publish(name); },
     async remove(name, id) { data[name] = data[name].filter((d) => d.id !== id); publish(name); },
+    async saveSettings(patch) { settings = { ...settings, ...patch }; emitSettings(settings); },
     async login() {},
     async logout() {},
   };
@@ -51,7 +56,9 @@ async function firebaseStore() {
     emitUser(user);
     unsubs.forEach((u) => u());
     unsubs = [];
-    if (!user) { COLLECTIONS.forEach((c) => emit(c, [])); return; }
+    if (!user) { COLLECTIONS.forEach((c) => emit(c, [])); emitSettings({}); return; }
+    unsubs.push(fs.onSnapshot(fs.doc(db, "users", uid, "settings", "prefs"),
+      (snap) => emitSettings(snap.data() || {}), (err) => console.error(err)));
     for (const name of COLLECTIONS) {
       const q = fs.query(fs.collection(db, "users", uid, name), fs.orderBy("createdAt", "desc"));
       unsubs.push(fs.onSnapshot(q, (snap) => {
@@ -65,6 +72,7 @@ async function firebaseStore() {
     async add(name, doc) { await fs.addDoc(col(name), { ...doc, createdAt: fs.serverTimestamp() }); },
     async update(name, id, patch) { await fs.updateDoc(fs.doc(col(name), id), patch); },
     async remove(name, id) { await fs.deleteDoc(fs.doc(col(name), id)); },
+    async saveSettings(patch) { await fs.setDoc(fs.doc(db, "users", uid, "settings", "prefs"), patch, { merge: true }); },
     async login() { await auth.signInWithPopup(a, new auth.GoogleAuthProvider()); },
     async logout() { await auth.signOut(a); },
   };
@@ -81,6 +89,7 @@ export const store = {
   remove: (id) => api.remove("bets", id),
   addTransaction: (t) => api.add("transactions", t),
   removeTransaction: (id) => api.remove("transactions", id),
+  saveSettings: (patch) => api.saveSettings(patch),
   login: () => api.login(),
   logout: () => api.logout(),
 };

@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, isConfigured } from "./store.js?v=202610301700";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611021500";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -25,7 +25,8 @@ const state = {
   mode: {},                // match id -> "all" | "ha"
   slip: new Map(),         // match id -> Set(marchés)
   slipOdds: null,          // cote totale saisie à la main
-  slipStake: "",
+  slipStake: null,         // null = mise par défaut, tant que rien n'a été saisi
+  settings: {},            // réglages synchronisés : mise par défaut, tri des suggestions
   bets: [],
   transactions: [],
   view: "matches",
@@ -104,6 +105,7 @@ function renderMatches() {
 // Avec une cote de 2, un pari gagné rembourse un pari perdu : on cherche ceux qui ont le plus de chances de passer.
 const TARGET_ODDS = [1.8, 2.3];
 const MAX_LEGS = 6;
+const MAX_CANDIDATES = 40;
 const MIN_SUGGESTION = 0.45;   // en dessous, le pari perd plus souvent qu'il ne gagne
 
 // Toutes les sélections jouables d'un match : marchés de buts et buteurs, avec mes chances et la cote Unibet
@@ -122,6 +124,8 @@ function matchLegs(m) {
   return legs;
 }
 
+const comboSort = () => state.settings.comboSort || "p";
+
 function renderCombos() {
   const days = [0, 1].map((d) => { const x = new Date(); x.setDate(x.getDate() + d); return localDay(x); });
   // Matchs déjà joués dans un pari en cours : on ne les repropose pas
@@ -129,10 +133,10 @@ function renderCombos() {
   const matches = state.data.matches
     .filter((m) => !m.started && !m.finished && new Date(m.t) > Date.now() && days.includes(localDay(new Date(m.t))) && !taken.has(m.id));
   // « Coût » d'une sélection : chances perdues pour chaque point de cote gagné (plus c'est bas, mieux c'est).
-  // On garde les 2 meilleures sélections de chaque match, puis les 24 meilleures en tout.
+  // On garde les 2 meilleures sélections de chaque match, puis les meilleures en tout (la recherche reste rapide).
   const cost = (l) => -Math.log(l.p) / Math.log(l.odds);
   const cands = matches.flatMap((m) => matchLegs(m).filter((l) => l.odds > 1.03 && l.odds <= TARGET_ODDS[1]).sort((x, y) => cost(x) - cost(y)).slice(0, 2))
-    .sort((x, y) => cost(x) - cost(y)).slice(0, 24);
+    .sort((x, y) => cost(x) - cost(y)).slice(0, MAX_CANDIDATES);
   // Recherche de toutes les combinaisons (un seul pari par match) dont la cote totale tombe près de 2
   const found = [];
   const explore = (start, legs, odds, p) => {
@@ -155,16 +159,22 @@ function renderCombos() {
     c.legs.forEach((l) => used.add(l.m.id));
     c.legs.sort((x, y) => new Date(x.m.t) - new Date(y.m.t));
     state.combos.push(c);
-    if (state.combos.length === 4) break;
   }
+  const firstKickoff = (c) => new Date(c.legs[0].m.t).getTime();
+  if (comboSort() === "date") state.combos.sort((x, y) => firstKickoff(x) - firstKickoff(y) || y.p - x.p);
   // Plus rien à suggérer (tout est déjà parié, ou rien d'assez sûr) : le bloc disparaît
   if (!state.combos.length) { $("#combos").innerHTML = ""; return; }
   const dayLabel = (iso) => (localDay(new Date(iso)) === days[0] ? "Auj." : "Demain");
   $("#combos").innerHTML = `<details class="card combos" ${state.combosOpen ? "open" : ""}>
     <summary><h2>Mes paris suggérés (${state.combos.length})</h2></summary>
     <p class="hint">Paris simples ou combinés d'aujourd'hui et de demain dont la cote totale est proche de 2 (entre 1,80 et 2,30) :
-      un pari gagné compense un pari perdu. Classés par chances de passer. Marchés de buts et buteurs, sans les paris
+      un pari gagné compense un pari perdu. Marchés de buts et buteurs, sans les paris
       sur lesquels Unibet est bien moins confiant que moi ; les matchs déjà dans un pari en cours sont exclus.</p>
+    <div class="combo-sort">
+      <span class="muted small">Trier par</span>
+      ${[["p", "% passe"], ["date", "Date du match"]].map(([k, l]) =>
+        `<button class="chip ${comboSort() === k ? "on" : ""}" data-combo-sort="${k}">${l}</button>`).join("")}
+    </div>
     ${state.combos.length ? state.combos.map((c, i) => `<div class="combo">
       <div class="combo-title">${c.legs.length > 1 ? `Combiné × ${c.legs.length}` : "Pari simple"}</div>
       ${c.legs.map((l) => `<div class="combo-leg">
@@ -226,7 +236,7 @@ function renderBoosts() {
 
 async function saveBoost(id) {
   const b = state.data.boosts.find((x) => String(x.id) === id);
-  const stake = parseNum(prompt(`Mise sur cette cote boostée à ${fmtOdds(b.after)} (max ${b.max} €) :`) ?? "");
+  const stake = parseNum(prompt(`Mise sur cette cote boostée à ${fmtOdds(b.after)} (max ${b.max} €) :`, defaultStake()) ?? "");
   if (!(stake > 0)) return;
   try {
     await store.add({
@@ -529,16 +539,26 @@ function renderUpdated() {
 
 // ================================================================ Cotes
 
-// Le site Unibet n'est pas interrogé depuis le navigateur : on recharge le dernier relevé publié
+// Le site Unibet n'est pas interrogé depuis le navigateur : on recharge le dernier relevé publié.
+// Les paris se règlent aussi à cette occasion : une page restée ouverte n'attend plus un rechargement.
+const DATA_MAX_AGE = 5 * 60 * 1000;
+
+async function loadData() {
+  const r = await fetch(`data/matches.json?t=${Date.now()}`);
+  state.data = await r.json();
+  state.dataLoadedAt = Date.now();
+  renderUpdated();
+  renderMatches();
+  renderSlip();
+  renderBets();
+  persistScores(state.bets);
+}
+
 async function refreshOdds() {
   const btn = $("#refresh-odds");
   btn.disabled = true;
   try {
-    const r = await fetch(`data/matches.json?t=${Date.now()}`);
-    state.data = await r.json();
-    renderUpdated();
-    renderMatches();
-    renderSlip();
+    await loadData();
     toast("Dernier relevé des cotes chargé");
   } catch {
     toast("Impossible de recharger les cotes");
@@ -565,6 +585,8 @@ function suggestedOdds(sels) {
   return Math.round(total * 100) / 100;
 }
 
+const defaultStake = () => (state.settings.defaultStake ? String(state.settings.defaultStake).replace(".", ",") : "");
+
 function renderSlip() {
   const sels = slipSelections();
   const count = sels.reduce((n, s) => n + s.markets.length, 0);
@@ -578,7 +600,8 @@ function renderSlip() {
   }
   const suggested = suggestedOdds(sels);
   const oddsVal = state.slipOdds ?? suggested;
-  const stake = parseNum(state.slipStake);
+  const stakeVal = state.slipStake ?? defaultStake();
+  const stake = parseNum(stakeVal);
   const gain = parseNum(oddsVal) * stake;
   const sameMatch = sels.some((s) => s.markets.length > 1);
   const needLogin = isConfigured && !state.user;
@@ -600,7 +623,7 @@ function renderSlip() {
         <input id="slip-odds" inputmode="decimal" value="${esc(String(oddsVal).replace(".", ","))}">
       </label>
       <label class="field">Mise (€)
-        <input id="slip-stake" inputmode="decimal" placeholder="ex. 5" value="${esc(state.slipStake)}">
+        <input id="slip-stake" inputmode="decimal" placeholder="ex. 5" value="${esc(stakeVal)}">
       </label>
     </div>
     <p class="hint">Solde disponible : <b class="${bal < 0 ? "neg" : ""}">${fmtEur(bal)}</b>
@@ -644,7 +667,7 @@ async function saveBet() {
     await store.add(bet);
     state.slip.clear();
     state.slipOdds = null;
-    state.slipStake = "";
+    state.slipStake = null;
     renderSlip();
     renderMatches();
     toast("Pari enregistré ✔");
@@ -766,6 +789,10 @@ function renderBets() {
   ${list.length ? list.map(betCard).join("") : `<p class="empty">Aucun pari ${state.betFilter === "pending" ? "en cours" : state.betFilter === "settled" ? "terminé" : ""}.</p>`}`;
 }
 
+// Pari en cours dont un match devrait être fini (hors cotes boostées, réglées à la main)
+const waitingResult = (b) => b.status === "pending" && state.data && b.selections.some((s) =>
+  !s.markets.some((mk) => isBoost(mk.k)) && selectionStatus(s) === "pending" && Date.now() - new Date(s.kickoff) > 3 * 3600 * 1000);
+
 function betCard(b) {
   const n = b.selections.length;
   const gain = betReturn(b);
@@ -786,6 +813,7 @@ function betCard(b) {
         }).join("")}</div>
       </div></div>`;
     }).join("")}
+    ${waitingResult(b) ? `<p class="hint">Match terminé : résultat attendu au prochain relevé (dernier : ${new Date(state.data.generatedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}).</p>` : ""}
     <div class="bet-foot">
       <span>Cote <b>${fmtOdds(b.odds)}</b> · Mise <b>${fmtEur(b.stake)}</b> · ${b.status === "pending" ? `Gain pot. <b>${fmtEur(b.stake * b.odds)}</b>` : `Retour <b>${fmtEur(gain)}</b>`}</span>
     </div>
@@ -856,6 +884,13 @@ function renderProfile() {
       <button class="btn dark" data-tx="withdraw">Retirer</button>
     </div>
     <button class="btn secondary" data-tx="adjust" style="margin-top:8px">Corriger le solde</button>
+  </div>
+  <div class="card">
+    <h2>Mes réglages</h2>
+    <label class="field">Mise par défaut (€)
+      <input id="default-stake" inputmode="decimal" placeholder="ex. 0,10" value="${esc(defaultStake())}">
+    </label>
+    <p class="hint">Pré-remplie dans le bulletin. Laisse vide pour ne rien pré-remplir.</p>
   </div>
   <div class="card">
     <h2>Historique des crédits et retraits</h2>
@@ -1037,6 +1072,8 @@ document.addEventListener("click", async (e) => {
     state.slipOdds = null;
     renderSlip(); renderMatches(); $("#slip-sheet").showModal();
     toast(c.legs.length > 1 ? "Combiné ajouté au bulletin" : "Pari ajouté au bulletin");
+  } else if (d.comboSort) {
+    store.saveSettings({ comboSort: d.comboSort }).catch(console.error);
   } else if (d.boost !== undefined) {
     saveBoost(d.boost);
   } else if (t.id === "clear-slip") {
@@ -1086,6 +1123,14 @@ document.addEventListener("toggle", (e) => {
 
 document.addEventListener("change", (e) => {
   if (e.target.dataset.manual) store.update(e.target.dataset.manual, { manual: e.target.value || null });
+  if (e.target.id === "default-stake") {
+    const v = parseNum(e.target.value);
+    if (e.target.value.trim() && !(v > 0)) return toast("Indique un montant valide");
+    store.saveSettings({ defaultStake: v > 0 ? v : null }).then(() => toast("Mise par défaut enregistrée")).catch((err) => {
+      console.error(err);
+      toast("Erreur d'enregistrement");
+    });
+  }
 });
 
 // ================================================================ Démarrage
@@ -1101,6 +1146,7 @@ async function main() {
   });
   onBets((bets) => { state.bets = bets; persistScores(bets); renderBets(); renderAccount(); if (state.data) { renderMatches(); renderSlip(); } });
   onTransactions((txs) => { state.transactions = txs; renderAccount(); if (state.data) renderSlip(); });
+  onSettings((s) => { state.settings = s; if (state.data) { renderSlip(); renderMatches(); } if (state.view === "profile") renderProfile(); });
   const storeReady = initStore().catch((e) => {
     console.error(e);
     document.body.classList.replace("auth-pending", "locked");
@@ -1108,18 +1154,20 @@ async function main() {
   });
 
   try {
-    const r = await fetch(`data/matches.json?t=${Date.now()}`);
-    state.data = await r.json();
+    await loadData();
   } catch (e) {
     $("#matches").innerHTML = `<p class="empty">Impossible de charger les matchs. Réessaie dans un instant.</p>`;
     return;
   }
-  renderUpdated();
-  renderMatches();
-  renderSlip();
   await storeReady;
   renderBets();
   persistScores(state.bets);
+  // Retour sur l'app (onglet resté ouvert, téléphone) : on reprend les derniers résultats et cotes
+  const refreshIfOld = () => {
+    if (document.visibilityState === "visible" && Date.now() - state.dataLoadedAt > DATA_MAX_AGE) loadData().catch(console.error);
+  };
+  document.addEventListener("visibilitychange", refreshIfOld);
+  setInterval(refreshIfOld, DATA_MAX_AGE);
 }
 
 main();

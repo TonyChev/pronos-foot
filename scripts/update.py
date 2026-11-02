@@ -72,6 +72,7 @@ SITE_PATHS = {
 }
 SITE_NEAR = 6      # heures avant le coup d'envoi : relevé à chaque passage
 SITE_EVERY = 4     # heures entre deux relevés pour les matchs plus lointains
+SITE_NEAR_EVERY = 50  # minutes entre deux relevés d'un match proche (la collecte peut tourner plus souvent)
 SITE_PAUSE = 1     # secondes entre deux pages, pour ne pas charger le site
 BOOST_TERMS = re.compile(r"\s*\(([\d,.]+)\s*->\s*([\d,.]+)\s*/\s*Mise max (\d+)[^)]*\)")
 FOOTBALL_GROUP = 1000093190
@@ -686,8 +687,8 @@ def attach_site_odds(upcoming, teams, now, previous):
             continue
         old = previous.get(m["id"], {})
         near = parse_utc(m["t"]) - now <= timedelta(hours=SITE_NEAR)
-        fresh = old.get("oddsAt") and now - parse_utc(old["oddsAt"]) < timedelta(hours=SITE_EVERY)
-        if fresh and not near:
+        wait = timedelta(minutes=SITE_NEAR_EVERY) if near else timedelta(hours=SITE_EVERY)
+        if old.get("oddsAt") and now - parse_utc(old["oddsAt"]) < wait:
             m["odds"], m["oddsAt"], m["oddsSrc"] = old["odds"], old["oddsAt"], "site"
             kept = {p["id"]: p for side in ("h", "a") for p in (old.get("scorers") or {}).get(side, [])}
             for p in ((m.get("scorers") or {}).get("h", []) + (m.get("scorers") or {}).get("a", [])):
