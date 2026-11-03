@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611021500";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611031557";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -101,10 +101,12 @@ function renderMatches() {
 
 // ================================================================ Combinés suggérés
 
-// Suggestions : paris simples ou combinés (autant de matchs que nécessaire) dont la cote totale est proche de 2.
+// Suggestions : paris simples dont la cote est proche de 2.
 // Avec une cote de 2, un pari gagné rembourse un pari perdu : on cherche ceux qui ont le plus de chances de passer.
+// Pas de combinés : la marge d'Unibet (~12 %) se paie sur chaque match ajouté (~23 % sur 2 matchs).
+// Rejoué sur 723 cotes d'avant-match : les cotes au-dessus de 2,30 ont perdu 34 %, celles entre 1,80 et 2,30 seulement 6 %.
 const TARGET_ODDS = [1.8, 2.3];
-const MAX_LEGS = 6;
+const MAX_LEGS = 1;
 const MAX_CANDIDATES = 40;
 const MIN_SUGGESTION = 0.45;   // en dessous, le pari perd plus souvent qu'il ne gagne
 
@@ -167,8 +169,9 @@ function renderCombos() {
   const dayLabel = (iso) => (localDay(new Date(iso)) === days[0] ? "Auj." : "Demain");
   $("#combos").innerHTML = `<details class="card combos" ${state.combosOpen ? "open" : ""}>
     <summary><h2>Mes paris suggérés (${state.combos.length})</h2></summary>
-    <p class="hint">Paris simples ou combinés d'aujourd'hui et de demain dont la cote totale est proche de 2 (entre 1,80 et 2,30) :
-      un pari gagné compense un pari perdu. Marchés de buts et buteurs, sans les paris
+    <p class="hint">Paris simples d'aujourd'hui et de demain à cote proche de 2 (entre 1,80 et 2,30) :
+      un pari gagné compense un pari perdu. Pas de combinés : la marge d'Unibet se paierait sur chaque match.
+      Mise conseillée : <b>${fmtEur(suggestedStake())}</b>. Marchés de buts et buteurs, sans les paris
       sur lesquels Unibet est bien moins confiant que moi ; les matchs déjà dans un pari en cours sont exclus.</p>
     <div class="combo-sort">
       <span class="muted small">Trier par</span>
@@ -585,7 +588,14 @@ function suggestedOdds(sels) {
   return Math.round(total * 100) / 100;
 }
 
-const defaultStake = () => (state.settings.defaultStake ? String(state.settings.defaultStake).replace(".", ",") : "");
+// Mise conseillée : un petit pourcentage fixe du solde (2 % par défaut), arrondi à 10 centimes, jamais sous le minimum Unibet.
+// Mise fixe plutôt que proportionnelle à « l'avantage » : rejoués sur 723 cotes, mes chances ne prévoient pas mieux
+// que la cote Unibet, donc aucun pari ne mérite une mise plus grosse qu'un autre.
+const MIN_STAKE = 0.1;
+const DEFAULT_STAKE_PCT = 2;
+const stakePct = () => state.settings.stakePct || DEFAULT_STAKE_PCT;
+const suggestedStake = () => Math.max(MIN_STAKE, Math.floor((balance() * stakePct()) / 100 * 10 + 1e-9) / 10);
+const defaultStake = () => String(suggestedStake().toFixed(2)).replace(".", ",");
 
 function renderSlip() {
   const sels = slipSelections();
@@ -628,6 +638,10 @@ function renderSlip() {
     </div>
     <p class="hint">Solde disponible : <b class="${bal < 0 ? "neg" : ""}">${fmtEur(bal)}</b>
       <span id="stake-warn" class="neg" ${stake > bal ? "" : "hidden"}> · mise supérieure à ton solde</span></p>
+    <p class="hint">Mise conseillée : <b>${fmtEur(suggestedStake())}</b> (${stakePct()} % du solde, minimum ${fmtEur(MIN_STAKE)}).
+      ${bal > 0 && MIN_STAKE > (bal * stakePct()) / 100 ? `Avec ce solde, le minimum Unibet représente déjà ${Math.round((MIN_STAKE / bal) * 100)} % du solde : ne monte pas la mise.` : ""}</p>
+    ${count > 1 ? `<p class="hint warn">⚠ Combiné : la marge d'Unibet (~12 %) se paie sur chaque sélection (~23 % sur 2). Plusieurs paris simples coûtent moins cher.</p>` : ""}
+    ${parseNum(oddsVal) > TARGET_ODDS[1] ? `<p class="hint warn">⚠ Cote au-dessus de 2,30 : sur les matchs passés, ces paris ont perdu 34 % de leur mise.</p>` : ""}
     <p class="hint">Cote calculée : ${String(suggested).replace(".", ",")}. Corrige-la avec la cote exacte affichée par Unibet${sameMatch ? " (2 paris sur un même match = « Bet Builder » : la cote réelle est différente du produit)" : ""}.</p>
     <div class="summary-line"><span>Gain potentiel</span><b id="slip-gain">${Number.isFinite(gain) ? fmtEur(gain) : "–"}</b></div>
     ${needLogin ? `<button class="btn" data-login>Se connecter pour enregistrer</button>`
@@ -887,10 +901,11 @@ function renderProfile() {
   </div>
   <div class="card">
     <h2>Mes réglages</h2>
-    <label class="field">Mise par défaut (€)
-      <input id="default-stake" inputmode="decimal" placeholder="ex. 0,10" value="${esc(defaultStake())}">
+    <label class="field">Mise conseillée (% du solde)
+      <input id="stake-pct" inputmode="decimal" placeholder="${DEFAULT_STAKE_PCT}" value="${state.settings.stakePct ? String(state.settings.stakePct).replace(".", ",") : ""}">
     </label>
-    <p class="hint">Pré-remplie dans le bulletin. Laisse vide pour ne rien pré-remplir.</p>
+    <p class="hint">Pré-remplie dans le bulletin : ${stakePct()} % de ton solde, soit <b>${fmtEur(suggestedStake())}</b> aujourd'hui
+      (arrondi à 10 centimes, minimum ${fmtEur(MIN_STAKE)}). Entre 1 et 3 % recommandé ; laisse vide pour ${DEFAULT_STAKE_PCT} %.</p>
   </div>
   <div class="card">
     <h2>Historique des crédits et retraits</h2>
@@ -1123,10 +1138,10 @@ document.addEventListener("toggle", (e) => {
 
 document.addEventListener("change", (e) => {
   if (e.target.dataset.manual) store.update(e.target.dataset.manual, { manual: e.target.value || null });
-  if (e.target.id === "default-stake") {
+  if (e.target.id === "stake-pct") {
     const v = parseNum(e.target.value);
-    if (e.target.value.trim() && !(v > 0)) return toast("Indique un montant valide");
-    store.saveSettings({ defaultStake: v > 0 ? v : null }).then(() => toast("Mise par défaut enregistrée")).catch((err) => {
+    if (e.target.value.trim() && !(v > 0 && v <= 20)) return toast("Indique un pourcentage entre 0 et 20");
+    store.saveSettings({ stakePct: v > 0 ? v : null }).then(() => toast("Mise conseillée enregistrée")).catch((err) => {
       console.error(err);
       toast("Erreur d'enregistrement");
     });

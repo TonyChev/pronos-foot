@@ -440,3 +440,4 @@ body.locked .help-fab, body.auth-pending .help-fab { display: none; }
 .rel-table .h { font-size: 11px; color: var(--muted); text-align: center; font-weight: 600; }
 .rel-table .v { text-align: center; }
 .export-box { width: 100%; min-height: 120px; margin-top: 10px; font: 12px/1.4 monospace; border: 1.5px solid var(--border); border-radius: 4px; padding: 8px; }
+.hint.warn { color: var(--bad); font-weight: 600; }
