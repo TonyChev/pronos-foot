@@ -740,6 +740,13 @@ def regulation_score(m):
     return [hg, len(m["g"]) - hg]
 
 
+def scorer_odds(m):
+    """Cotes buteurs d'un match, pour tester plus tard les buteurs conseillés :
+    [id du joueur, 0 = domicile / 1 = extérieur, cote, buts attendus par 90 min, minutes habituelles]"""
+    return [[p["id"], i, p["o"], p.get("r"), p.get("min")]
+            for i, side in enumerate(("h", "a")) for p in (m.get("scorers") or {}).get(side, []) if p.get("o")]
+
+
 def main():
     now = datetime.now(timezone.utc)
     DATA.mkdir(exist_ok=True)
@@ -752,11 +759,9 @@ def main():
     for mid, odds in prev_odds.items():
         if mid in cache:
             cache[mid]["o"] = odds
-    # Cotes buteurs d'avant-match, pour tester plus tard les buteurs conseillés :
-    # [id du joueur, 0 = domicile / 1 = extérieur, cote, buts attendus par 90 min, minutes habituelles]
+    # Cotes buteurs d'avant-match (figées au coup d'envoi dans « so ») : passent dans le cache à la fin du match
     for mid, m in previous.items():
-        so = [[p["id"], i, p["o"], p.get("r"), p.get("min")]
-              for i, side in enumerate(("h", "a")) for p in (m.get("scorers") or {}).get(side, []) if p.get("o")]
+        so = m.get("so") or scorer_odds(m)
         if so and mid in cache:
             cache[mid]["so"] = so
     if not cache and not upcoming:
@@ -774,13 +779,18 @@ def main():
             m["odds"] = prev_odds[m["id"]]
             if previous[m["id"]].get("oddsSrc"):
                 m["oddsSrc"] = previous[m["id"]]["oddsSrc"]
+        # Les buteurs disparaissent au coup d'envoi : on garde leurs dernières cotes d'avant-match
+        so = None if m["started"] else scorer_odds(m)
+        so = so or previous.get(m["id"], {}).get("so")
+        if so:
+            m["so"] = so
 
     # Résultats récents (score à 90 min) pour régler automatiquement les paris
     limit = now - timedelta(days=RESULTS_DAYS)
     results = {mid: regulation_score(m) for mid, m in cache.items() if parse_utc(m["t"]) >= limit}
     # Buteurs (hors contre son camp) et joueurs entrés en jeu des matchs récents : règlement des paris buteur
     scorers = {mid: {"g": sorted({g[2] for g in m["g"] if len(g) > 2 and g[2]}), "p": m["p"]}
-               for mid, m in cache.items() if m.get("p")}
+               for mid, m in cache.items() if m.get("p") and parse_utc(m["t"]) >= now - timedelta(days=PLAYED_DAYS)}
 
     out = {
         "generatedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
