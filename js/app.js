@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611031557";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611042000";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -218,10 +218,14 @@ function renderBoosts() {
   const boosts = (state.data?.boosts || []).filter((b) => new Date(b.t) > now && !taken.has(`cb:${b.id}`))
     .map((b) => ({ ...b, ...boostValue(b) })).filter((b) => b.edge >= 0).sort((x, y) => y.edge - x.edge);
   if (!boosts.length) { $("#boosts").innerHTML = ""; return; }
-  $("#boosts").innerHTML = `<details class="card combos boosts" ${state.boostsOpen ? "open" : ""}>
-    <summary><h2>Cotes boostées Unibet (${boosts.length})</h2></summary>
-    <p class="hint">Seules les offres à valeur positive sont affichées. Valeur estimée d'après le boost et la marge habituelle d'Unibet, sans analyse du match.
-      Le règlement se fait à la main dans Mes paris.</p>
+  // Les boosts sont les seuls paris qui battent la marge d'Unibet par construction :
+  // le bloc s'ouvre tout seul (et passe avant les suggestions) dès qu'une offre est vraiment intéressante.
+  const good = boosts.filter((b) => b.level === "yes").length;
+  $("#boosts").innerHTML = `<details class="card combos boosts" ${state.boostsOpen ?? good > 0 ? "open" : ""}>
+    <summary><h2>Cotes boostées Unibet (${boosts.length})${good ? ` <span class="boost-badge">★ ${good} intéressante${good > 1 ? "s" : ""}</span>` : ""}</h2></summary>
+    <p class="hint">Mes meilleurs paris : le boost paie plus que le vrai risque, alors que les autres paris paient la marge d'Unibet (~12 %).
+      Seules les offres à valeur positive sont affichées. Valeur estimée d'après le boost et la marge habituelle d'Unibet, sans analyse du match.
+      Mise conseillée : <b>${fmtEur(suggestedStake())}</b> (dans la limite du plafond Unibet). Le règlement se fait à la main dans Mes paris.</p>
     ${boosts.map((b) => `<div class="combo">
       <div class="combo-title"><span class="dot ${b.level}"></span> ${BOOST_LABEL[b.level]}</div>
       <div class="combo-leg">
@@ -239,7 +243,7 @@ function renderBoosts() {
 
 async function saveBoost(id) {
   const b = state.data.boosts.find((x) => String(x.id) === id);
-  const stake = parseNum(prompt(`Mise sur cette cote boostée à ${fmtOdds(b.after)} (max ${b.max} €) :`, defaultStake()) ?? "");
+  const stake = parseNum(prompt(`Mise sur cette cote boostée à ${fmtOdds(b.after)} (max ${b.max} €, mise conseillée ${fmtEur(suggestedStake())}) :`, defaultStake()) ?? "");
   if (!(stake > 0)) return;
   try {
     await store.add({

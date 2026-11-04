@@ -285,14 +285,16 @@ def collect_fotmob(now):
         if res is None:
             continue
         entry = {**{k: f[k] for k in ("c", "t", "h", "a")}, "g": res["g"]}
-        if old_matches.get(mid, {}).get("o"):
-            entry["o"] = old_matches[mid]["o"]
+        for key in ("o", "so"):
+            if old_matches.get(mid, {}).get(key):
+                entry[key] = old_matches[mid][key]
         # xG du match ; null = indisponible chez FotMob (on ne le redemande pas)
         entry["x"] = res.get("x") if "x" in res or mid in fetched else old_matches.get(mid, {}).get("x")
         if entry["x"] is None and "x" not in res and mid not in fetched:
             del entry["x"]
         # La liste des joueurs entrés en jeu ne sert qu'aux paris récents
-        if res.get("p") and parse_utc(f["t"]) >= played_limit:
+        # (gardée aussi pour les matchs avec cotes buteurs : un buteur non entré en jeu est remboursé)
+        if res.get("p") and (parse_utc(f["t"]) >= played_limit or entry.get("so")):
             entry["p"] = res["p"]
         new_cache[mid] = entry
     return teams, new_cache, upcoming, finished
@@ -750,6 +752,13 @@ def main():
     for mid, odds in prev_odds.items():
         if mid in cache:
             cache[mid]["o"] = odds
+    # Cotes buteurs d'avant-match, pour tester plus tard les buteurs conseillés :
+    # [id du joueur, 0 = domicile / 1 = extérieur, cote, buts attendus par 90 min, minutes habituelles]
+    for mid, m in previous.items():
+        so = [[p["id"], i, p["o"], p.get("r"), p.get("min")]
+              for i, side in enumerate(("h", "a")) for p in (m.get("scorers") or {}).get(side, []) if p.get("o")]
+        if so and mid in cache:
+            cache[mid]["so"] = so
     if not cache and not upcoming:
         log("Aucune donnée récupérée : on garde les fichiers existants.")
         sys.exit(1)
