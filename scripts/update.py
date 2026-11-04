@@ -534,11 +534,12 @@ def similarity(a, b):
 
 
 def extract_odds(offers, home_en, away_en):
-    """Cotes Unibet : BTTS, plus de 1,5 / 2,5 buts, et plus de 1,5 buts de chaque équipe."""
+    """Cotes Unibet : BTTS, plus de 1,5 / 2,5 buts, moins de 2,5 buts, et plus de 1,5 buts de chaque équipe."""
     wanted = {
         ("Both Teams To Score", "Yes", None): "btts",
         ("Total Goals", "Over", 1500): "o15",
         ("Total Goals", "Over", 2500): "o25",
+        ("Total Goals", "Under", 2500): "u25",  # relevé seulement, pas encore affiché (test de rentabilité)
         (f"Total Goals by {home_en}", "Over", 1500): "h15",
         (f"Total Goals by {away_en}", "Over", 1500): "a15",
     }
@@ -656,6 +657,7 @@ def extract_site_odds(markets, home, away):
         "btts": site_price(markets.get("Les 2 équipes marquent"), "Oui"),
         "o15": site_price(markets.get("Plus / Moins 1.5 But(s)"), "Plus 1.5"),
         "o25": site_price(markets.get("Plus / Moins 2.5 But(s)"), "Plus 2.5"),
+        "u25": site_price(markets.get("Plus / Moins 2.5 But(s)"), "Moins 2.5"),  # relevé seulement, pas encore affiché
     }
     for name, market in markets.items():
         team = re.fullmatch(r"Plus / Moins But\(s\) - (.+) 1,5", name)
