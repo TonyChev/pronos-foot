@@ -781,7 +781,8 @@ def main():
                 m["oddsSrc"] = previous[m["id"]]["oddsSrc"]
         # Les buteurs disparaissent au coup d'envoi : on garde leurs dernières cotes d'avant-match
         so = None if m["started"] else scorer_odds(m)
-        so = so or previous.get(m["id"], {}).get("so")
+        prev = previous.get(m["id"], {})
+        so = so or prev.get("so") or scorer_odds(prev)
         if so:
             m["so"] = so
 
