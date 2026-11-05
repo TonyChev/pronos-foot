@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611042000";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611051523";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -847,7 +847,9 @@ function betCard(b) {
 
 // ================================================================ Portefeuille et profil
 
-const betReturn = (b) => (b.status === "won" ? b.stake * effOdds(b) : b.status === "void" ? b.stake : 0);
+// Gain arrondi au centime, pari par pari, comme Unibet le crédite (0,10 € × 1,85 = 0,185 → 0,19 €)
+const cents = (v) => Math.round(v * 100 + 1e-6) / 100;
+const betReturn = (b) => (b.status === "won" ? cents(b.stake * effOdds(b)) : b.status === "void" ? b.stake : 0);
 
 function wallet() {
   const sum = (type) => state.transactions.filter((t) => t.type === type).reduce((s, t) => s + t.amount, 0);
