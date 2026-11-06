@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611061522";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611062252";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -115,7 +115,7 @@ function matchLegs(m) {
   const est = estimate(m);
   if (!est) return [];
   const home = team(m.h).name, away = team(m.a).name;
-  const legs = ALL_MARKETS.filter((k) => m.odds?.[k] > 1 && !doubtful(m, est, k))
+  const legs = ALL_MARKETS.filter((k) => m.odds?.[k] > 1 && !doubtful(m, est, k) && !AVOID.has(k))
     .map((k) => ({ m, k, p: est[k], odds: m.odds[k], label: shortLabel(k, home, away) }));
   for (const side of ["h", "a"]) {
     for (const p of m.scorers?.[side] || []) {
@@ -398,13 +398,17 @@ const YES = (k) => (THRESHOLDS[k] || DEFAULT_THRESHOLDS)[0];
 const MAYBE = (k) => (THRESHOLDS[k] || DEFAULT_THRESHOLDS)[1];
 const level = (p, k) => (p >= YES(k) ? "yes" : p >= MAYBE(k) ? "maybe" : "no");
 // Niveau final d'un marché sur un match : un pari douteux (Unibet bien moins confiant) passe au mieux en « jouable »
+// Marchés que je ne conseille plus : « équipe à l'extérieur +1,5 », rejoué sur 150 matchs avec cote :
+// arrivé 36 % du temps pour 42 % annoncés, −31 % de rentabilité (domicile : 0 %), mes stats bien moins justes qu'Unibet.
+const AVOID = new Set(["a15"]);
 const marketLevel = (m, est, k) => {
+  if (AVOID.has(k)) return "no";
   const lv = level(est[k], k);
   return lv === "yes" && doubtful(m, est, k) ? "maybe" : lv;
 };
 // Marge au-dessus du seuil « je miserais » : sert à choisir le marché le plus convaincant
 // (un marché douteux passe derrière les autres)
-const margin = (est, k, m) => est[k] - YES(k) - (m && doubtful(m, est, k) ? 1 : 0);
+const margin = (est, k, m) => est[k] - YES(k) - (m && doubtful(m, est, k) ? 1 : 0) - (AVOID.has(k) ? 2 : 0);
 
 function verdictHTML(m) {
   const est = estimate(m);
@@ -424,7 +428,8 @@ function verdictHTML(m) {
     const p = Math.round(est[k] * 100);
     const o = m.odds?.[k];
     const tag = `<i class="dot ${marketLevel(m, est, k)}"></i>`;
-    const warn = doubtful(m, est, k) && level(est[k], k) !== "no"
+    const warn = AVOID.has(k) ? ` <span class="warn">⚠ +1,5 à l'extérieur : −31 % sur les matchs passés, je ne le conseille pas</span>`
+      : doubtful(m, est, k) && level(est[k], k) !== "no"
       ? ` <span class="warn">⚠ Unibet moins confiant (${Math.round(unibetProb(o) * 100)}% contre ${Math.round(est.stats[k] * 100)}% pour mes stats)</span>` : "";
     return `<span>${tag} ${esc(shortLabel(k, home, away))} : ${pctSpan(p)}${o ? ` · cote ${fmtOdds(o)}` : ""}${warn}</span>`;
   };
