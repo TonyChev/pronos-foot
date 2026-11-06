@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611051523";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611061522";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -592,11 +592,11 @@ function suggestedOdds(sels) {
   return Math.round(total * 100) / 100;
 }
 
-// Mise conseillée : un petit pourcentage fixe du solde (2 % par défaut), arrondi à 10 centimes, jamais sous le minimum Unibet.
+// Mise conseillée : un petit pourcentage fixe du solde (1 % par défaut), arrondi à 10 centimes, jamais sous le minimum Unibet.
 // Mise fixe plutôt que proportionnelle à « l'avantage » : rejoués sur 723 cotes, mes chances ne prévoient pas mieux
 // que la cote Unibet, donc aucun pari ne mérite une mise plus grosse qu'un autre.
 const MIN_STAKE = 0.1;
-const DEFAULT_STAKE_PCT = 2;
+const DEFAULT_STAKE_PCT = 1;
 const stakePct = () => state.settings.stakePct || DEFAULT_STAKE_PCT;
 const suggestedStake = () => Math.max(MIN_STAKE, Math.floor((balance() * stakePct()) / 100 * 10 + 1e-9) / 10);
 const defaultStake = () => String(suggestedStake().toFixed(2)).replace(".", ",");
