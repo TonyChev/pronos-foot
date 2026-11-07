@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611062252";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611071322";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -31,6 +31,8 @@ const state = {
   transactions: [],
   view: "matches",
   betFilter: "pending",
+  betWallet: "real",       // portefeuille affiché dans Mes paris : "real" (Unibet) ou "fun" (freebet fictif)
+  slipWallet: "real",      // portefeuille du pari en cours de saisie
   combos: [],
   combosOpen: false,       // bloc des combinés suggérés replié par défaut
   reliability: null,       // résultat de « Fiabilité de mes avis », calculé à la demande
@@ -131,7 +133,7 @@ const comboSort = () => state.settings.comboSort || "p";
 function renderCombos() {
   const days = [0, 1].map((d) => { const x = new Date(); x.setDate(x.getDate() + d); return localDay(x); });
   // Matchs déjà joués dans un pari en cours : on ne les repropose pas
-  const taken = new Set(state.bets.filter((b) => betStatus(b) === "pending").flatMap((b) => b.selections.map((s) => s.matchId)));
+  const taken = new Set(state.bets.filter((b) => !isFun(b) && betStatus(b) === "pending").flatMap((b) => b.selections.map((s) => s.matchId)));
   const matches = state.data.matches
     .filter((m) => !m.started && !m.finished && new Date(m.t) > Date.now() && days.includes(localDay(new Date(m.t))) && !taken.has(m.id));
   // « Coût » d'une sélection : chances perdues pour chaque point de cote gagné (plus c'est bas, mieux c'est).
@@ -604,7 +606,14 @@ const MIN_STAKE = 0.1;
 const DEFAULT_STAKE_PCT = 1;
 const stakePct = () => state.settings.stakePct || DEFAULT_STAKE_PCT;
 const suggestedStake = () => Math.max(MIN_STAKE, Math.floor((balance() * stakePct()) / 100 * 10 + 1e-9) / 10);
-const defaultStake = () => String(suggestedStake().toFixed(2)).replace(".", ",");
+// Portefeuille « Freebet » : totalement fictif (rien n'est misé sur Unibet), pour s'amuser avec des simples et des combinés
+const FUN = "fun";
+const isFun = (x) => x.wallet === FUN;
+const inWallet = (w) => (x) => (w === FUN) === isFun(x);
+const DEFAULT_FUN_STAKE = 1;
+const funStake = () => state.settings.funStake || DEFAULT_FUN_STAKE;
+const fmtInput = (v) => String(Number(v).toFixed(2)).replace(".", ",");
+const defaultStake = (w = "real") => fmtInput(w === FUN ? funStake() : suggestedStake());
 
 function renderSlip() {
   const sels = slipSelections();
@@ -619,12 +628,13 @@ function renderSlip() {
   }
   const suggested = suggestedOdds(sels);
   const oddsVal = state.slipOdds ?? suggested;
-  const stakeVal = state.slipStake ?? defaultStake();
+  const fun = state.slipWallet === FUN;
+  const stakeVal = state.slipStake ?? defaultStake(state.slipWallet);
   const stake = parseNum(stakeVal);
   const gain = parseNum(oddsVal) * stake;
   const sameMatch = sels.some((s) => s.markets.length > 1);
   const needLogin = isConfigured && !state.user;
-  const bal = balance();
+  const bal = balance(state.slipWallet);
   view.innerHTML = `<div class="card">
     <h2>${count > 1 ? `Combiné · ${count} sélections` : "Pari simple"}</h2>
     ${sels.map(({ m, markets }) => `<div class="sel">
@@ -637,6 +647,11 @@ function renderSlip() {
     </div>`).join("")}
   </div>
   <div class="card">
+    <div class="combo-sort wallet-pick">
+      <span class="muted small">Portefeuille</span>
+      ${[["real", "Unibet (réel)"], [FUN, "🎲 Freebet (fictif)"]].map(([k, l]) =>
+        `<button class="chip ${state.slipWallet === k ? "on" : ""}" data-slip-wallet="${k}">${l}</button>`).join("")}
+    </div>
     <div class="grid2">
       <label class="field">Cote totale Unibet
         <input id="slip-odds" inputmode="decimal" value="${esc(String(oddsVal).replace(".", ","))}">
@@ -645,16 +660,17 @@ function renderSlip() {
         <input id="slip-stake" inputmode="decimal" placeholder="ex. 5" value="${esc(stakeVal)}">
       </label>
     </div>
-    <p class="hint">Solde disponible : <b class="${bal < 0 ? "neg" : ""}">${fmtEur(bal)}</b>
+    <p class="hint">Solde ${fun ? "freebet" : "disponible"} : <b class="${bal < 0 ? "neg" : ""}">${fmtEur(bal)}</b>
       <span id="stake-warn" class="neg" ${stake > bal ? "" : "hidden"}> · mise supérieure à ton solde</span></p>
-    <p class="hint">Mise conseillée : <b>${fmtEur(suggestedStake())}</b> (${stakePct()} % du solde, minimum ${fmtEur(MIN_STAKE)}).
-      ${bal > 0 && MIN_STAKE > (bal * stakePct()) / 100 ? `Avec ce solde, le minimum Unibet représente déjà ${Math.round((MIN_STAKE / bal) * 100)} % du solde : ne monte pas la mise.` : ""}</p>
-    ${count > 1 ? `<p class="hint warn">⚠ Combiné : la marge d'Unibet (~12 %) se paie sur chaque sélection (~23 % sur 2). Plusieurs paris simples coûtent moins cher.</p>` : ""}
-    ${parseNum(oddsVal) > TARGET_ODDS[1] ? `<p class="hint warn">⚠ Cote au-dessus de 2,30 : sur les matchs passés, ces paris ont perdu 34 % de leur mise.</p>` : ""}
+    ${fun ? `<p class="hint">🎲 Pari fictif : rien n'est misé sur Unibet, il compte seulement dans ton portefeuille Freebet
+      (mise par défaut ${fmtEur(funStake())}).</p>` : `<p class="hint">Mise conseillée : <b>${fmtEur(suggestedStake())}</b> (${stakePct()} % du solde, minimum ${fmtEur(MIN_STAKE)}).
+      ${bal > 0 && MIN_STAKE > (bal * stakePct()) / 100 ? `Avec ce solde, le minimum Unibet représente déjà ${Math.round((MIN_STAKE / bal) * 100)} % du solde : ne monte pas la mise.` : ""}</p>`}
+    ${count > 1 && !fun ? `<p class="hint warn">⚠ Combiné : la marge d'Unibet (~12 %) se paie sur chaque sélection (~23 % sur 2). Plusieurs paris simples coûtent moins cher.</p>` : ""}
+    ${parseNum(oddsVal) > TARGET_ODDS[1] && !fun ? `<p class="hint warn">⚠ Cote au-dessus de 2,30 : sur les matchs passés, ces paris ont perdu 34 % de leur mise.</p>` : ""}
     <p class="hint">Cote calculée : ${String(suggested).replace(".", ",")}. Corrige-la avec la cote exacte affichée par Unibet${sameMatch ? " (2 paris sur un même match = « Bet Builder » : la cote réelle est différente du produit)" : ""}.</p>
     <div class="summary-line"><span>Gain potentiel</span><b id="slip-gain">${Number.isFinite(gain) ? fmtEur(gain) : "–"}</b></div>
     ${needLogin ? `<button class="btn" data-login>Se connecter pour enregistrer</button>`
-      : `<button class="btn" id="save-bet">Enregistrer mon pari</button>`}
+      : `<button class="btn" id="save-bet">${fun ? "Enregistrer mon pari freebet" : "Enregistrer mon pari"}</button>`}
     <button class="btn secondary" id="clear-slip" style="margin-top:8px">Vider le bulletin</button>
   </div>`;
 }
@@ -675,9 +691,10 @@ async function saveBet() {
   const stake = parseNum($("#slip-stake").value);
   if (!(odds > 1)) return toast("Indique la cote totale");
   if (!(stake > 0)) return toast("Indique ta mise");
-  if (stake > balance() && !confirm(`Ta mise (${fmtEur(stake)}) dépasse ton solde (${fmtEur(balance())}). Enregistrer quand même ?`)) return;
+  const w = state.slipWallet;
+  if (stake > balance(w) && !confirm(`Ta mise (${fmtEur(stake)}) dépasse ton solde ${w === FUN ? "freebet " : ""}(${fmtEur(balance(w))}). Enregistrer quand même ?`)) return;
   const bet = {
-    odds, stake, manual: null,
+    odds, stake, manual: null, ...(w === FUN ? { wallet: FUN } : {}),
     selections: sels.map(({ m, markets }) => ({
       matchId: m.id, compId: m.c, kickoff: m.t,
       home: team(m.h).name, away: team(m.a).name, homeId: m.h, awayId: m.a,
@@ -693,7 +710,7 @@ async function saveBet() {
     state.slipStake = null;
     renderSlip();
     renderMatches();
-    toast("Pari enregistré ✔");
+    toast(w === FUN ? "Pari freebet enregistré 🎲" : "Pari enregistré ✔");
   } catch (e) {
     console.error(e);
     toast(`Erreur d'enregistrement (${e.code || e.message})`);
@@ -773,7 +790,8 @@ function renderBets() {
       <button class="btn" data-login>Se connecter avec Google</button></div>`;
     return;
   }
-  const bets = state.bets.map((b) => ({ ...b, status: betStatus(b) }));
+  const fun = state.betWallet === FUN;
+  const bets = state.bets.filter(inWallet(state.betWallet)).map((b) => ({ ...b, status: betStatus(b) }));
   const settled = bets.filter((b) => b.status !== "pending");
   const won = settled.filter((b) => b.status === "won");
   const lost = settled.filter((b) => b.status === "lost");
@@ -784,7 +802,7 @@ function renderBets() {
   const sign = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "");
   // Évolution du portefeuille : résultat des paris réglés rapporté à l'argent que tu y as mis
   // (crédits − retraits ± corrections). Ex. 1,10 € → 1,22 € = +10,9 %.
-  const w = wallet();
+  const w = wallet(state.betWallet);
   const capital = w.deposits - w.withdrawals + w.adjust;
   const growth = capital > 0 ? (w.result / capital) * 100 : null;
 
@@ -793,8 +811,12 @@ function renderBets() {
     .sort((x, y) => (x.status !== "pending") - (y.status !== "pending"));
 
   view.innerHTML = `${!isConfigured ? `<div class="card small">⚠️ <b>Mode démo</b> : la synchronisation Firebase n'est pas encore configurée, tes paris seront perdus au rechargement de la page (voir README).</div>` : ""}
+  <div class="days wallet-tabs">
+    ${[["real", "Unibet (réel)"], [FUN, "🎲 Freebet (fictif)"]].map(([k, l]) =>
+      `<button class="chip-day ${state.betWallet === k ? "active" : ""}" data-bet-wallet="${k}">${l}</button>`).join("")}
+  </div>
   <div class="card">
-    <h2>Bilan</h2>
+    <h2>Bilan${fun ? " · Freebet (fictif)" : ""}</h2>
     <div class="stats-grid">
       <div class="stat"><b>${won.length} / ${won.length + lost.length}</b><span>paris gagnés</span></div>
       <div class="stat"><b>${pct(won.length, won.length + lost.length)}%</b><span>réussite</span></div>
@@ -821,7 +843,7 @@ function betCard(b) {
   const gain = betReturn(b);
   return `<div class="card">
     <div class="bet-head">
-      <div><b>${n > 1 ? `Combiné × ${n}` : "Simple"}</b> <span class="muted small">· ${new Date(b.createdAt).toLocaleDateString("fr-FR")}</span></div>
+      <div><b>${n > 1 ? `Combiné × ${n}` : "Simple"}</b>${isFun(b) ? ` <span class="fun-badge">🎲 Freebet</span>` : ""} <span class="muted small">· ${new Date(b.createdAt).toLocaleDateString("fr-FR")}</span></div>
       <span class="status ${b.status}">${STATUS_LABEL[b.status]}</span>
     </div>
     ${b.selections.map((s) => {
@@ -856,9 +878,9 @@ function betCard(b) {
 const cents = (v) => Math.round(v * 100 + 1e-6) / 100;
 const betReturn = (b) => (b.status === "won" ? cents(b.stake * effOdds(b)) : b.status === "void" ? b.stake : 0);
 
-function wallet() {
-  const sum = (type) => state.transactions.filter((t) => t.type === type).reduce((s, t) => s + t.amount, 0);
-  const bets = state.bets.map((b) => ({ ...b, status: betStatus(b) }));
+function wallet(w = "real") {
+  const sum = (type) => state.transactions.filter((t) => t.type === type && inWallet(w)(t)).reduce((s, t) => s + t.amount, 0);
+  const bets = state.bets.filter(inWallet(w)).map((b) => ({ ...b, status: betStatus(b) }));
   const staked = bets.reduce((s, b) => s + b.stake, 0);
   const returned = bets.reduce((s, b) => s + betReturn(b), 0);
   const pendingStake = bets.filter((b) => b.status === "pending").reduce((s, b) => s + b.stake, 0);
@@ -869,7 +891,7 @@ function wallet() {
     balance: deposits - withdrawals + adjust - staked + returned,
   };
 }
-const balance = () => wallet().balance;
+const balance = (w = "real") => wallet(w).balance;
 
 function renderWallet() {
   const box = $("#user-box");
@@ -883,6 +905,13 @@ function renderWallet() {
 function renderProfile() {
   const view = $("#view-profile");
   const w = wallet();
+  const fw = wallet(FUN);
+  const txRow = (t) => `<div class="tx">
+      <div><b>${TX_LABEL[t.type]}</b><div class="muted small">${new Date(t.createdAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })} · ${new Date(t.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</div></div>
+      <b class="${t.type === "withdraw" || t.amount < 0 ? "neg" : "pos"}">${t.type === "withdraw" ? "−" : t.amount > 0 ? "+" : "−"}${fmtEur(Math.abs(t.amount))}</b>
+      <button class="rm" data-tx-delete="${t.id}" aria-label="Supprimer">✕</button>
+    </div>`;
+  const funTx = state.transactions.filter(isFun);
   const u = state.user;
   const sign = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "");
   const plus = (v) => `${v > 0 ? "+" : ""}${fmtEur(v)}`;
@@ -910,6 +939,25 @@ function renderProfile() {
     </div>
     <button class="btn secondary" data-tx="adjust" style="margin-top:8px">Corriger le solde</button>
   </div>
+  <div class="card fun-wallet">
+    <h2>🎲 Portefeuille Freebet</h2>
+    <p class="hint">Totalement fictif : pour t'amuser avec des simples et des combinés sans rien miser sur Unibet.
+      Choisis « Freebet » dans le bulletin pour y enregistrer un pari.</p>
+    <div class="wallet-balance ${fw.balance < 0 ? "neg" : ""}">${fmtEur(fw.balance)}</div>
+    <div class="stats-grid">
+      <div class="stat"><b>${fmtEur(fw.deposits - fw.withdrawals + fw.adjust)}</b><span>crédité (fictif)</span></div>
+      <div class="stat"><b class="${sign(fw.result)}">${plus(fw.result)}</b><span>résultat des paris</span></div>
+      <div class="stat"><b>${fmtEur(fw.pendingStake)}</b><span>en jeu</span></div>
+    </div>
+    <label class="field" style="margin-top:12px">Montant fictif (€)
+      <input id="tx-amount-fun" inputmode="decimal" placeholder="ex. 100">
+    </label>
+    <div class="grid2" style="margin-top:10px">
+      <button class="btn" data-tx="deposit" data-wallet="${FUN}">Créditer</button>
+      <button class="btn secondary" data-tx="adjust" data-wallet="${FUN}">Corriger</button>
+    </div>
+    ${funTx.length ? `<details style="margin-top:10px"><summary class="small">Historique (${funTx.length})</summary>${funTx.map(txRow).join("")}</details>` : ""}
+  </div>
   <div class="card">
     <h2>Mes réglages</h2>
     <label class="field">Mise conseillée (% du solde)
@@ -917,30 +965,31 @@ function renderProfile() {
     </label>
     <p class="hint">Pré-remplie dans le bulletin : ${stakePct()} % de ton solde, soit <b>${fmtEur(suggestedStake())}</b> aujourd'hui
       (arrondi à 10 centimes, minimum ${fmtEur(MIN_STAKE)}). Entre 1 et 3 % recommandé ; laisse vide pour ${DEFAULT_STAKE_PCT} %.</p>
+    <label class="field" style="margin-top:12px">Mise par défaut Freebet (€)
+      <input id="fun-stake" inputmode="decimal" placeholder="${fmtInput(DEFAULT_FUN_STAKE)}" value="${state.settings.funStake ? fmtInput(state.settings.funStake) : ""}">
+    </label>
+    <p class="hint">Pré-remplie quand tu choisis le portefeuille Freebet : <b>${fmtEur(funStake())}</b>. Laisse vide pour ${fmtEur(DEFAULT_FUN_STAKE)}.</p>
   </div>
   <div class="card">
     <h2>Historique des crédits et retraits</h2>
-    ${state.transactions.length ? state.transactions.map((t) => `<div class="tx">
-      <div><b>${TX_LABEL[t.type]}</b><div class="muted small">${new Date(t.createdAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })} · ${new Date(t.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</div></div>
-      <b class="${t.type === "withdraw" || t.amount < 0 ? "neg" : "pos"}">${t.type === "withdraw" ? "−" : t.amount > 0 ? "+" : "−"}${fmtEur(Math.abs(t.amount))}</b>
-      <button class="rm" data-tx-delete="${t.id}" aria-label="Supprimer">✕</button>
-    </div>`).join("") : `<p class="muted small">Aucun mouvement pour l'instant. Commence par créditer ton portefeuille.</p>`}
+    ${state.transactions.some((t) => !isFun(t)) ? state.transactions.filter((t) => !isFun(t)).map(txRow).join("") : `<p class="muted small">Aucun mouvement pour l'instant. Commence par créditer ton portefeuille.</p>`}
   </div>
   ${ownerToolsHTML()}`;
 }
 
-async function addTransaction(type) {
-  const amount = parseNum($("#tx-amount").value);
+async function addTransaction(type, w = "real") {
+  const amount = parseNum($(w === FUN ? "#tx-amount-fun" : "#tx-amount").value);
+  const tag = w === FUN ? { wallet: FUN } : {};
   if (type === "adjust") {
     if (!Number.isFinite(amount)) return toast("Indique le solde souhaité");
-    const delta = Math.round((amount - balance()) * 100) / 100;
+    const delta = Math.round((amount - balance(w)) * 100) / 100;
     if (!delta) return toast("Le solde est déjà à ce montant");
-    await store.addTransaction({ type, amount: delta });
-    return toast(`Solde corrigé à ${fmtEur(amount)}`);
+    await store.addTransaction({ type, amount: delta, ...tag });
+    return toast(`Solde ${w === FUN ? "freebet " : ""}corrigé à ${fmtEur(amount)}`);
   }
   if (!(amount > 0)) return toast("Indique un montant");
-  if (type === "withdraw" && amount > balance() && !confirm("Ce retrait dépasse ton solde. Continuer ?")) return;
-  await store.addTransaction({ type, amount });
+  if (type === "withdraw" && amount > balance(w) && !confirm("Ce retrait dépasse ton solde. Continuer ?")) return;
+  await store.addTransaction({ type, amount, ...tag });
   toast(type === "deposit" ? `${fmtEur(amount)} crédités` : `${fmtEur(amount)} retirés`);
 }
 
@@ -1043,6 +1092,7 @@ function exportBets() {
     return {
       date: new Date(b.createdAt).toISOString().slice(0, 10), statut: STATUS_LABEL[st], cote: b.odds, mise: b.stake,
       retour: Math.round(betReturn({ ...b, status: st }) * 100) / 100, force: b.manual || undefined,
+      portefeuille: isFun(b) ? "freebet (fictif)" : undefined,
       selections: b.selections.map((s) => ({
         match: `${s.home} - ${s.away}`, coup_envoi: s.kickoff, score: selectionScore(s)?.join("-") ?? null,
         paris: s.markets.map((mk) => ({ marche: marketLabel(mk.k, s.home, s.away, mk.name), cote: mk.odds, resultat: marketResult(s, mk) })),
@@ -1050,7 +1100,7 @@ function exportBets() {
     };
   });
   const w = wallet();
-  return `Pronos Foot · export du ${new Date().toLocaleString("fr-FR")} · solde ${fmtEur(w.balance)}\n${JSON.stringify(lines)}`;
+  return `Pronos Foot · export du ${new Date().toLocaleString("fr-FR")} · solde ${fmtEur(w.balance)} · freebet ${fmtEur(balance(FUN))}\n${JSON.stringify(lines)}`;
 }
 
 // ================================================================ Navigation et événements
@@ -1121,7 +1171,9 @@ document.addEventListener("click", async (e) => {
       .catch(() => { box.hidden = false; box.value = text; box.select(); toast("Sélectionne le texte et copie-le"); });
   }
   else if (d.closeLegend !== undefined) $("#legend").close();
-  else if (d.tx) addTransaction(d.tx).catch((err) => { console.error(err); toast(`Erreur d'enregistrement (${err.code || err.message})`); });
+  else if (d.slipWallet) { state.slipWallet = d.slipWallet; state.slipStake = null; renderSlip(); }
+  else if (d.betWallet) { state.betWallet = d.betWallet; renderBets(); }
+  else if (d.tx) addTransaction(d.tx, d.wallet || "real").catch((err) => { console.error(err); toast(`Erreur d'enregistrement (${err.code || err.message})`); });
   else if (d.txDelete) { if (confirm("Supprimer ce mouvement ?")) store.removeTransaction(d.txDelete); }
   else if (d.delete) { if (confirm("Supprimer ce pari ?")) store.remove(d.delete); }
   else if (d.login !== undefined) store.login().catch((err) => toast(err.code === "auth/popup-closed-by-user" ? "Connexion annulée" : "Connexion impossible"));
@@ -1137,7 +1189,7 @@ document.addEventListener("input", (e) => {
   if (e.target.id === "slip-odds" || e.target.id === "slip-stake") {
     const g = parseNum($("#slip-odds").value) * parseNum($("#slip-stake").value);
     $("#slip-gain").textContent = Number.isFinite(g) ? fmtEur(g) : "–";
-    $("#stake-warn").hidden = !(parseNum($("#slip-stake").value) > balance());
+    $("#stake-warn").hidden = !(parseNum($("#slip-stake").value) > balance(state.slipWallet));
     renderSlipBar();
   }
 });
@@ -1149,6 +1201,11 @@ document.addEventListener("toggle", (e) => {
 
 document.addEventListener("change", (e) => {
   if (e.target.dataset.manual) store.update(e.target.dataset.manual, { manual: e.target.value || null });
+  if (e.target.id === "fun-stake") {
+    const v = parseNum(e.target.value);
+    if (e.target.value.trim() && !(v > 0)) return toast("Indique un montant valide");
+    store.saveSettings({ funStake: v > 0 ? v : null }).then(() => toast("Mise Freebet enregistrée")).catch((err) => { console.error(err); toast("Erreur d'enregistrement"); });
+  }
   if (e.target.id === "stake-pct") {
     const v = parseNum(e.target.value);
     if (e.target.value.trim() && !(v > 0 && v <= 20)) return toast("Indique un pourcentage entre 0 et 20");

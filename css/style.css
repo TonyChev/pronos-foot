@@ -442,3 +442,9 @@ body.locked .help-fab, body.auth-pending .help-fab { display: none; }
 .export-box { width: 100%; min-height: 120px; margin-top: 10px; font: 12px/1.4 monospace; border: 1.5px solid var(--border); border-radius: 4px; padding: 8px; }
 .hint.warn { color: var(--bad); font-weight: 600; }
 .boost-badge { display: inline-block; white-space: nowrap; margin-left: 6px; padding: 2px 8px; font-size: 12px; background: var(--aqua); color: #000; vertical-align: middle; }
+.fun-badge { display: inline-block; margin-left: 4px; padding: 1px 6px; font-size: 11px; font-weight: 700; background: var(--pink); color: #fff; }
+.wallet-pick { margin-bottom: 12px; flex-wrap: wrap; }
+.wallet-tabs { margin-bottom: 12px; }
+.wallet-pick .chip { background: var(--surface-2); color: var(--text); }
+.wallet-pick .chip.on { background: var(--ink); color: var(--aqua); }
+.fun-wallet .wallet-balance { margin-top: 16px; }
