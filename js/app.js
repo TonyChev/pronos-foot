@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611071322";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611071331";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -1010,9 +1010,11 @@ function ownerToolsHTML() {
   </div>
   <div class="card">
     <h2>Retours pour Claude</h2>
-    <p class="hint">Copie tous tes paris (cotes, mises, sélections, résultats) puis colle-les dans ta conversation avec Claude
-      en écrivant « fais le bilan ».</p>
-    <button class="btn" data-export-bets>Copier mes paris pour Claude</button>
+    <p class="hint">Copie tes paris réels Unibet (cotes, mises, sélections, résultats) puis colle-les dans ta conversation avec Claude
+      en écrivant « fais le bilan ». Les paris Freebet n'y sont jamais inclus.</p>
+    <button class="btn" data-export-bets="real">Copier mes paris réels pour Claude</button>
+    <p class="hint" style="margin-top:12px">Pour une analyse de tes paris fictifs, à part :</p>
+    <button class="btn secondary" data-export-bets="${FUN}">🎲 Copier mes paris Freebet</button>
     <textarea id="export-box" class="export-box" readonly hidden></textarea>
   </div>`;
 }
@@ -1085,22 +1087,22 @@ function reliabilityHTML(r) {
     <button class="link-btn" data-reliability>Recalculer</button>`;
 }
 
-// Export texte de tous les paris, à coller dans la conversation avec Claude
-function exportBets() {
-  const lines = state.bets.map((b) => {
+// Export texte des paris d'UN seul portefeuille, à coller dans la conversation avec Claude.
+// Argent réel et Freebet ne sont jamais mélangés : l'export réel exclut toujours les paris fictifs.
+function exportBets(w = "real") {
+  const lines = state.bets.filter(inWallet(w)).map((b) => {
     const st = betStatus(b);
     return {
       date: new Date(b.createdAt).toISOString().slice(0, 10), statut: STATUS_LABEL[st], cote: b.odds, mise: b.stake,
       retour: Math.round(betReturn({ ...b, status: st }) * 100) / 100, force: b.manual || undefined,
-      portefeuille: isFun(b) ? "freebet (fictif)" : undefined,
       selections: b.selections.map((s) => ({
         match: `${s.home} - ${s.away}`, coup_envoi: s.kickoff, score: selectionScore(s)?.join("-") ?? null,
         paris: s.markets.map((mk) => ({ marche: marketLabel(mk.k, s.home, s.away, mk.name), cote: mk.odds, resultat: marketResult(s, mk) })),
       })),
     };
   });
-  const w = wallet();
-  return `Pronos Foot · export du ${new Date().toLocaleString("fr-FR")} · solde ${fmtEur(w.balance)} · freebet ${fmtEur(balance(FUN))}\n${JSON.stringify(lines)}`;
+  const head = w === FUN ? "Pronos Foot · export FREEBET (paris fictifs, à analyser à part)" : "Pronos Foot · export des paris RÉELS";
+  return `${head} du ${new Date().toLocaleString("fr-FR")} · solde ${fmtEur(balance(w))}\n${JSON.stringify(lines)}`;
 }
 
 // ================================================================ Navigation et événements
@@ -1165,9 +1167,9 @@ document.addEventListener("click", async (e) => {
     computeReliability().then((r) => { state.reliability = r; renderProfile(); })
       .catch((err) => { console.error(err); $("#reliability").innerHTML = `<p class="neg">Calcul impossible, réessaie.</p>`; });
   } else if (d.exportBets !== undefined) {
-    const text = exportBets();
+    const text = exportBets(d.exportBets === FUN ? FUN : "real");
     const box = $("#export-box");
-    navigator.clipboard.writeText(text).then(() => toast("Paris copiés : colle-les dans Claude"))
+    navigator.clipboard.writeText(text).then(() => toast(d.exportBets === FUN ? "Paris Freebet copiés" : "Paris réels copiés : colle-les dans Claude"))
       .catch(() => { box.hidden = false; box.value = text; box.select(); toast("Sélectionne le texte et copie-le"); });
   }
   else if (d.closeLegend !== undefined) $("#legend").close();
