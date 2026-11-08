@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081338";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081340";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -82,7 +82,9 @@ function renderMatches() {
   renderBoosts();
   const all = dayMatches();
   const order = state.data.competitions.map((c) => c.id);
-  const present = order.filter((id) => all.some((m) => m.c === id));
+  // Compétitions du jour, par ordre alphabétique
+  const present = order.filter((id) => all.some((m) => m.c === id))
+    .sort((x, y) => comp(x).name.localeCompare(comp(y).name, "fr", { sensitivity: "base" }) || comp(x).country.localeCompare(comp(y).country, "fr"));
   if (state.comp !== "all" && !present.includes(state.comp)) state.comp = "all";
 
   // Sélecteur de compétition (liste déroulante native : pratique au doigt sur téléphone)
