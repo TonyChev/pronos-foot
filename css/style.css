@@ -461,3 +461,13 @@ body.locked .help-fab, body.auth-pending .help-fab { display: none; }
 .lb-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; font-weight: 600; }
 .lb-form { display: inline-flex; gap: 3px; }
 .lb-form .dot { width: 8px; height: 8px; }
+.comp-select { position: relative; display: block; margin-bottom: 8px; }
+.comp-select select {
+  width: 100%; appearance: none; -webkit-appearance: none; padding: 11px 40px 11px 14px;
+  background: var(--ink); color: var(--aqua); border: 0; font-family: var(--display); font-weight: 700; font-size: 14px;
+  clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%); cursor: pointer;
+}
+.comp-select select:focus { outline: 2px solid var(--aqua); outline-offset: 2px; }
+.comp-select::after { content: "▾"; position: absolute; right: 22px; top: 50%; transform: translateY(-50%); color: var(--aqua); pointer-events: none; }
+.comp-select option { background: var(--surface); color: var(--text); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

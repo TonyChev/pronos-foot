@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081332";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081338";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -85,14 +85,17 @@ function renderMatches() {
   const present = order.filter((id) => all.some((m) => m.c === id));
   if (state.comp !== "all" && !present.includes(state.comp)) state.comp = "all";
 
-  $("#comp-filter").innerHTML = [
-    `<button class="chip ${state.comp === "all" ? "active" : ""}" data-comp="all">Toutes (${all.length})</button>`,
-    ...present.map((id) => {
-      const c = comp(id);
-      const n = all.filter((m) => m.c === id).length;
-      return `<button class="chip ${state.comp === id ? "active" : ""}" data-comp="${id}">${c.flag} ${esc(c.name)} (${n})</button>`;
-    }),
-  ].join("");
+  // Sélecteur de compétition (liste déroulante native : pratique au doigt sur téléphone)
+  $("#comp-filter").innerHTML = `<label class="comp-select">
+    <span class="sr-only">Compétition</span>
+    <select id="comp-select" aria-label="Compétition">
+      <option value="all" ${state.comp === "all" ? "selected" : ""}>🌍 Toutes les compétitions (${all.length})</option>
+      ${present.map((id) => {
+        const c = comp(id);
+        return `<option value="${id}" ${state.comp === id ? "selected" : ""}>${c.flag} ${esc(c.name)} (${all.filter((m) => m.c === id).length})</option>`;
+      }).join("")}
+    </select>
+  </label>`;
 
   // Ordre chronologique, toutes compétitions mélangées ; les matchs commencés ou terminés passent en fin de liste
   const past = (m) => m.started || m.finished || new Date(m.t) <= Date.now();
@@ -1305,6 +1308,7 @@ document.addEventListener("toggle", (e) => {
 }, true);
 
 document.addEventListener("change", (e) => {
+  if (e.target.id === "comp-select") { state.comp = e.target.value === "all" ? "all" : Number(e.target.value); renderMatches(); }
   if (e.target.dataset.manual) store.update(e.target.dataset.manual, { manual: e.target.value || null }, colOf(e.target.dataset.manual)).catch(console.error);
   if (e.target.id === "pseudo") {
     const v = e.target.value.trim().slice(0, 20);
