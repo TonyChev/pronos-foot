@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081340";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081343";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -22,6 +22,7 @@ const state = {
   day: 0,
   comp: "all",
   closed: new Set(),       // matchs repliés (tous dépliés par défaut)
+  scorersOpen: new Set(),  // blocs « Buteurs » ouverts (tous repliés par défaut)
   mode: {},                // match id -> "all" | "ha"
   slip: new Map(),         // match id -> Set(marchés)
   slipOdds: null,          // cote totale saisie à la main
@@ -479,11 +480,13 @@ const WHY = { injury: "blessé", suspension: "suspendu", international: "en sél
 function scorersHTML(m, picked) {
   const sc = m.scorers;
   if (!sc || !(sc.h.length || sc.a.length)) return "";
+  let shownCount = 0, anyValue = false;
   const side = (key, teamId) => {
     // 3 joueurs maximum, ayant déjà marqué cette saison et avec au moins 25 % de chances
     const players = sc[key].map((p) => ({ ...p, prob: scorerProb(m, key, p) }))
       .filter((p) => p.g > 0 && p.prob >= SCORER_MIN)
       .sort((x, y) => y.prob - x.prob).slice(0, 3);
+    shownCount += players.length;
     const out = sc[`${key}Out`] || [];
     const goalsLine = (p) => `${p.g} but${p.g > 1 ? "s" : ""}${p.mp ? ` en ${p.mp} match${p.mp > 1 ? "s" : ""}` : ""}`;
     return `<div class="sc-team"><img class="logo" src="${teamLogo(teamId)}" alt=""><span>${esc(team(teamId).name)}</span></div>
@@ -494,6 +497,7 @@ function scorersHTML(m, picked) {
         // ★ : la cote Unibet paie nettement plus que ce que mes chances justifient
         // (pas sur les outsiders, où l'estimation est trop incertaine)
         const value = p.o && p.prob >= 0.2 && p.prob * p.o >= 1.2;
+        if (value) anyValue = true;
         const title = `${p.n} : ${goalsLine(p)} cette saison — mes chances : ${pr}%${p.o ? ` — Unibet : ${Math.round(100 / p.o)}%` : " — pas de cote Unibet"}`;
         return `<button class="odd sc-row ${picked.has(k) ? "picked" : ""}" data-pick="${k}" data-id="${m.id}" ${p.o ? "" : "disabled"} title="${esc(title)}">
           <span class="odd-label">${esc(p.n)}<small>${goalsLine(p)}</small></span>
@@ -501,10 +505,13 @@ function scorersHTML(m, picked) {
       }).join("")}</div>
       ${out.length ? `<p class="sc-out">Absents : ${out.map((o) => `${esc(o.n)} (${WHY[o.why] || "absent"}, ${o.g} but${o.g > 1 ? "s" : ""})`).join(" · ")}</p>` : ""}`;
   };
-  return `<div class="scorers">
-    <h3>Buteurs</h3>
-    ${side("h", m.h)}${side("a", m.a)}
-  </div>`;
+  // Bloc replié par défaut ; reste ouvert si je l'ouvre ou si un buteur de ce match est dans le bulletin
+  const body = side("h", m.h) + side("a", m.a);
+  const open = state.scorersOpen.has(String(m.id)) || [...picked].some(isScorer);
+  return `<details class="scorers" data-scorers="${m.id}" ${open ? "open" : ""}>
+    <summary><h3>Buteurs</h3><span class="muted small">${shownCount ? `${shownCount} joueur${shownCount > 1 ? "s" : ""}` : "aucun conseillé"}${anyValue ? ` · <i class="value">★</i>` : ""}</span></summary>
+    ${body}
+  </details>`;
 }
 
 function cellsHTML(values) {
@@ -1305,6 +1312,11 @@ document.addEventListener("input", (e) => {
 });
 
 document.addEventListener("toggle", (e) => {
+  if (e.target.dataset?.scorers) {
+    const id = e.target.dataset.scorers;
+    if (e.target.open) state.scorersOpen.add(id); else state.scorersOpen.delete(id);
+    return;
+  }
   if (e.target.classList?.contains("boosts")) state.boostsOpen = e.target.open;
   else if (e.target.classList?.contains("combos")) state.combosOpen = e.target.open;
 }, true);
