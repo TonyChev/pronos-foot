@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, isConfigured } from "./store.js?v=202611071331";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081332";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -33,6 +33,11 @@ const state = {
   betFilter: "pending",
   betWallet: "real",       // portefeuille affiché dans Mes paris : "real" (Unibet) ou "fun" (freebet fictif)
   slipWallet: "real",      // portefeuille du pari en cours de saisie
+  privBets: [],            // paris stockés dans le compte (réels, et anciens Freebet d'avant le classement)
+  funbets: [],             // paris Freebet de tous les joueurs connectés (classement)
+  players: [],             // pseudos des joueurs
+  lbUnavailable: false,    // règles Firestore du classement pas encore publiées
+  lbPeriod: "month",
   combos: [],
   combosOpen: false,       // bloc des combinés suggérés replié par défaut
   reliability: null,       // résultat de « Fiabilité de mes avis », calculé à la demande
@@ -704,7 +709,17 @@ async function saveBet() {
   const btn = $("#save-bet");
   btn.disabled = true;
   try {
-    await store.add(bet);
+    if (w === FUN) {
+      // Pari Freebet : partagé pour le classement (coup d'envoi enregistré : un pari après le début du match ne compte pas)
+      const firstKickoff = Math.min(...sels.map(({ m }) => new Date(m.t).getTime()));
+      try {
+        await store.addFun({ ...bet, firstKickoff });
+      } catch (e) {
+        if (e.code !== "permission-denied") throw e;
+        await store.add(bet);
+        toast("Classement pas encore activé : pari gardé dans ton seul portefeuille");
+      }
+    } else await store.add(bet);
     state.slip.clear();
     state.slipOdds = null;
     state.slipStake = null;
@@ -778,8 +793,90 @@ function persistScores(bets) {
       }
       return s;
     });
-    if (changed) store.update(bet.id, { selections }).catch(console.error);
+    if (changed) store.update(bet.id, { selections }, bet._col).catch(console.error);
   }
+}
+
+// ================================================================ Classement Freebet
+
+// Mes paris = ceux de mon compte + mes paris Freebet partagés (chacun garde sa collection pour les modifier)
+function mergeBets() {
+  const me = state.user?.uid ?? store.uid();
+  const mine = state.funbets.filter((b) => b.uid === me).map((b) => ({ ...b, wallet: FUN, _col: "funbets" }));
+  state.bets = [...state.privBets, ...mine].sort((a, b) => b.createdAt - a.createdAt);
+}
+const colOf = (id) => state.bets.find((b) => b.id === id)?._col || "bets";
+
+const firstName = (n) => String(n || "").trim().split(/\s+/)[0] || "Joueur";
+const myPseudo = () => state.settings.pseudo || firstName(state.user?.displayName);
+// Pseudo public : publié seulement s'il a changé (et sans bloquer si le classement n'est pas encore activé)
+function syncPlayer() {
+  if (!state.user || state.lbUnavailable) return;
+  const cur = state.players.find((p) => p.id === state.user.uid);
+  const name = myPseudo();
+  if (cur?.name === name) return;
+  store.setPlayer({ name }).catch((e) => console.warn("pseudo non publié", e.code));
+}
+
+// Système de classement « tipster » : 1 pari = 1 unité, quelle que soit la mise.
+// Le crédit Freebet étant libre, classer en euros favoriserait celui qui mise le plus ; en unités,
+// seuls comptent les bons choix. Rang = bénéfice en unités, départage au rendement (bénéfice ÷ paris).
+// Statut automatique seulement (un « Forcer : gagné » ne compte pas), et un pari enregistré après le coup d'envoi est ignoré.
+const autoStatus = (b) => combine(b.selections.map(selectionStatus));
+function leaderboard(period) {
+  const now = new Date();
+  const start = period === "month" ? new Date(now.getFullYear(), now.getMonth(), 1).getTime() : 0;
+  const rows = new Map();
+  for (const b of state.funbets) {
+    if (b.createdAt < start || (b.firstKickoff && b.createdAt > b.firstKickoff)) continue;
+    const r = rows.get(b.uid) || { uid: b.uid, n: 0, won: 0, units: 0, pending: 0, form: [] };
+    const st = autoStatus(b);
+    if (st === "pending") r.pending++;
+    else if (st !== "void") {
+      r.n++;
+      if (st === "won") { r.won++; r.units += effOdds({ ...b, manual: null }) - 1; } else r.units -= 1;
+      r.form.push({ t: b.firstKickoff || b.createdAt, st });
+    }
+    rows.set(b.uid, r);
+  }
+  const name = (uid) => state.players.find((p) => p.id === uid)?.name || "Joueur";
+  return [...rows.values()].map((r) => ({
+    ...r, name: name(r.uid), yield: r.n ? r.units / r.n : 0,
+    form: r.form.sort((x, y) => y.t - x.t).slice(0, 5),
+  })).sort((x, y) => y.units - x.units || y.yield - x.yield || y.n - x.n);
+}
+
+function leaderboardHTML() {
+  const head = `<h2>🏆 Classement Freebet</h2>`;
+  if (state.lbUnavailable) {
+    return `<div class="card leaderboard">${head}<p class="hint">Classement pas encore activé : les règles Firestore doivent être
+      mises à jour (voir README). Tes paris Freebet restent enregistrés dans ton portefeuille.</p></div>`;
+  }
+  const rows = leaderboard(state.lbPeriod);
+  const me = state.user?.uid ?? store.uid();
+  const units = (u) => `${u > 0 ? "+" : ""}${u.toFixed(2).replace(".", ",")} u`;
+  const medal = (i) => ["🥇", "🥈", "🥉"][i] || `${i + 1}`;
+  return `<div class="card leaderboard">${head}
+    <div class="combo-sort lb-period">
+      ${[["month", "Ce mois-ci"], ["all", "Depuis le début"]].map(([k, l]) =>
+        `<button class="chip ${state.lbPeriod === k ? "on" : ""}" data-lb-period="${k}">${l}</button>`).join("")}
+    </div>
+    ${rows.length ? `<div class="lb-table">
+      <div class="lb-row lb-head"><span>#</span><span>Joueur</span><span>Bénéf.</span><span>Rdt</span><span>G/J</span></div>
+      ${rows.map((r, i) => `<div class="lb-row ${r.uid === me ? "me" : ""}">
+        <span class="lb-rank">${medal(i)}</span>
+        <span class="lb-name">${esc(r.name)}${r.uid === me ? ` <i class="muted">(toi)</i>` : ""}
+          <span class="lb-form">${r.form.map((f) => `<i class="dot ${f.st === "won" ? "yes" : "no"}"></i>`).join("")}</span>
+          ${r.pending ? `<span class="muted small">${r.pending} en cours</span>` : ""}</span>
+        <b class="${r.units > 0 ? "pos" : r.units < 0 ? "neg" : ""}">${units(r.units)}</b>
+        <span>${r.n ? `${r.yield > 0 ? "+" : ""}${Math.round(r.yield * 100)} %` : "–"}</span>
+        <span>${r.won}/${r.n}</span>
+      </div>`).join("")}
+    </div>` : `<p class="muted small">Personne n'a encore de pari Freebet ${state.lbPeriod === "month" ? "ce mois-ci" : ""}. Lance-toi !</p>`}
+    <p class="hint">1 unité (u) = 1 pari, quelle que soit la mise : seuls comptent les bons choix. Gagné à 2,50 = +1,50 u, perdu = −1 u.
+      Rdt (rendement) = bénéfice ÷ nombre de paris, G/J = gagnés / joués. Statut automatique uniquement, paris enregistrés avant le coup d'envoi.
+      Ton pseudo se règle dans le profil.</p>
+  </div>`;
 }
 
 function renderBets() {
@@ -815,6 +912,7 @@ function renderBets() {
     ${[["real", "Unibet (réel)"], [FUN, "🎲 Freebet (fictif)"]].map(([k, l]) =>
       `<button class="chip-day ${state.betWallet === k ? "active" : ""}" data-bet-wallet="${k}">${l}</button>`).join("")}
   </div>
+  ${fun ? leaderboardHTML() : ""}
   <div class="card">
     <h2>Bilan${fun ? " · Freebet (fictif)" : ""}</h2>
     <div class="stats-grid">
@@ -969,6 +1067,10 @@ function renderProfile() {
       <input id="fun-stake" inputmode="decimal" placeholder="${fmtInput(DEFAULT_FUN_STAKE)}" value="${state.settings.funStake ? fmtInput(state.settings.funStake) : ""}">
     </label>
     <p class="hint">Pré-remplie quand tu choisis le portefeuille Freebet : <b>${fmtEur(funStake())}</b>. Laisse vide pour ${fmtEur(DEFAULT_FUN_STAKE)}.</p>
+    <label class="field" style="margin-top:12px">Pseudo dans le classement Freebet
+      <input id="pseudo" maxlength="20" placeholder="${esc(firstName(state.user?.displayName))}" value="${esc(state.settings.pseudo || "")}">
+    </label>
+    <p class="hint">Visible par les autres joueurs connectés. Laisse vide pour ton prénom.</p>
   </div>
   <div class="card">
     <h2>Historique des crédits et retraits</h2>
@@ -1177,7 +1279,8 @@ document.addEventListener("click", async (e) => {
   else if (d.betWallet) { state.betWallet = d.betWallet; renderBets(); }
   else if (d.tx) addTransaction(d.tx, d.wallet || "real").catch((err) => { console.error(err); toast(`Erreur d'enregistrement (${err.code || err.message})`); });
   else if (d.txDelete) { if (confirm("Supprimer ce mouvement ?")) store.removeTransaction(d.txDelete); }
-  else if (d.delete) { if (confirm("Supprimer ce pari ?")) store.remove(d.delete); }
+  else if (d.delete) { if (confirm("Supprimer ce pari ?")) store.remove(d.delete, colOf(d.delete)).catch((err) => toast(err.code === "permission-denied" ? "Match commencé : un pari Freebet ne peut plus être supprimé" : "Suppression impossible")); }
+  else if (d.lbPeriod) { state.lbPeriod = d.lbPeriod; renderBets(); }
   else if (d.login !== undefined) store.login().catch((err) => toast(err.code === "auth/popup-closed-by-user" ? "Connexion annulée" : "Connexion impossible"));
   else if (d.logout !== undefined) { if (confirm("Se déconnecter ?")) store.logout(); }
 });
@@ -1202,7 +1305,11 @@ document.addEventListener("toggle", (e) => {
 }, true);
 
 document.addEventListener("change", (e) => {
-  if (e.target.dataset.manual) store.update(e.target.dataset.manual, { manual: e.target.value || null });
+  if (e.target.dataset.manual) store.update(e.target.dataset.manual, { manual: e.target.value || null }, colOf(e.target.dataset.manual)).catch(console.error);
+  if (e.target.id === "pseudo") {
+    const v = e.target.value.trim().slice(0, 20);
+    store.saveSettings({ pseudo: v || null }).then(() => toast("Pseudo enregistré")).catch(console.error);
+  }
   if (e.target.id === "fun-stake") {
     const v = parseNum(e.target.value);
     if (e.target.value.trim() && !(v > 0)) return toast("Indique un montant valide");
@@ -1228,10 +1335,14 @@ async function main() {
     document.body.classList.remove("auth-pending");
     document.body.classList.toggle("locked", isConfigured && !state.user);
     renderAccount(); renderSlip(); renderBets();
+    syncPlayer();
   });
-  onBets((bets) => { state.bets = bets; persistScores(bets); renderBets(); renderAccount(); if (state.data) { renderMatches(); renderSlip(); } });
+  const betsChanged = () => { mergeBets(); persistScores(state.bets); renderBets(); renderAccount(); if (state.data) { renderMatches(); renderSlip(); } };
+  onBets((bets) => { state.privBets = bets; betsChanged(); });
+  onFunBets((docs) => { state.lbUnavailable = docs === null; state.funbets = docs || []; betsChanged(); });
+  onPlayers((docs) => { state.players = docs || []; syncPlayer(); if (state.betWallet === FUN) renderBets(); });
   onTransactions((txs) => { state.transactions = txs; renderAccount(); if (state.data) renderSlip(); });
-  onSettings((s) => { state.settings = s; if (state.data) { renderSlip(); renderMatches(); } if (state.view === "profile") renderProfile(); });
+  onSettings((s) => { state.settings = s; syncPlayer(); if (state.data) { renderSlip(); renderMatches(); } if (state.view === "profile") renderProfile(); });
   const storeReady = initStore().catch((e) => {
     console.error(e);
     document.body.classList.replace("auth-pending", "locked");

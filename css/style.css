@@ -448,3 +448,16 @@ body.locked .help-fab, body.auth-pending .help-fab { display: none; }
 .wallet-pick .chip { background: var(--surface-2); color: var(--text); }
 .wallet-pick .chip.on { background: var(--ink); color: var(--aqua); }
 .fun-wallet .wallet-balance { margin-top: 16px; }
+.leaderboard .lb-period { margin: 4px 0 10px; }
+.leaderboard .lb-period .chip { background: var(--surface-2); color: var(--text); }
+.leaderboard .lb-period .chip.on { background: var(--ink); color: var(--aqua); }
+.lb-table { display: grid; gap: 2px; }
+.lb-row { display: grid; grid-template-columns: 28px 1fr auto 62px 44px; gap: 8px; align-items: center; padding: 8px 6px; font-size: 13px; }
+.lb-row > span:nth-child(n+3), .lb-row > b { text-align: right; }
+.lb-row.lb-head { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); padding-bottom: 2px; }
+.lb-row:not(.lb-head) { background: var(--surface-2); }
+.lb-row.me { outline: 2px solid var(--aqua); outline-offset: -2px; }
+.lb-rank { font-size: 15px; text-align: center; }
+.lb-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; font-weight: 600; }
+.lb-form { display: inline-flex; gap: 3px; }
+.lb-form .dot { width: 8px; height: 8px; }

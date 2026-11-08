@@ -1,9 +1,34 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Chaque utilisateur ne voit et ne modifie que ses propres paris.
+    // Chaque utilisateur ne voit et ne modifie que ses propres paris réels, mouvements et réglages.
     match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Classement Freebet : pseudos visibles par les joueurs connectés, chacun ne modifie que le sien.
+    match /players/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId
+        && request.resource.data.name is string && request.resource.data.name.size() <= 20;
+    }
+
+    // Paris Freebet (fictifs), visibles par les joueurs connectés pour le classement.
+    match /funbets/{betId} {
+      allow read: if request.auth != null;
+      // Création : par son auteur, horodatée par le serveur, AVANT le coup d'envoi du premier match.
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.firstKickoff > request.time
+        && request.resource.data.odds is number && request.resource.data.odds > 1
+        && request.resource.data.stake is number && request.resource.data.stake > 0;
+      // Modification : seulement le score recopié et le statut forcé (ignoré par le classement).
+      allow update: if request.auth != null && resource.data.uid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["selections", "manual"]);
+      // Suppression : seulement avant le coup d'envoi (pas question d'effacer un pari perdu).
+      allow delete: if request.auth != null && resource.data.uid == request.auth.uid
+        && resource.data.firstKickoff > request.time;
     }
   }
 }
