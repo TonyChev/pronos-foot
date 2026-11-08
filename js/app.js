@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081346";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081350";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -314,8 +314,8 @@ function matchCard(m) {
     <div class="odds-row">${MATCH_MARKETS.map(oddBtn).join("")}</div>
     <div class="odds-row team">${TEAM_MARKETS.map(oddBtn).join("")}</div>
     ${locked ? "" : verdictHTML(m)}
-    ${open && !locked ? scorersHTML(m, picked) : ""}
     ${open ? distHTML(m) : ""}
+    ${open && !locked ? scorersHTML(m, picked) : ""}
   </article>`;
 }
 

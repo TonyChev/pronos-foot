@@ -120,9 +120,11 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 
 /* ---------- Liste des matchs ---------- */
 .match {
-  background: var(--surface); border-radius: 4px; margin-bottom: 10px; box-shadow: var(--shadow);
+  background: var(--surface); border-radius: 4px; margin-bottom: 22px; box-shadow: var(--shadow);
   overflow: hidden; border-left: 3px solid transparent;
+  border-top: 4px solid var(--ink);   /* séparateur bien visible entre deux matchs */
 }
+.match .scorers { margin-top: 10px; }
 .match:has(.verdict.yes) { border-left-color: var(--aqua); }
 .match-comp {
   display: flex; align-items: center; gap: 6px; padding: 10px 12px 0; font-size: 12px; font-weight: 700;
