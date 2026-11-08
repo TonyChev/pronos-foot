@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081356";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081400";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -284,7 +284,8 @@ function standingOf(teamId, compId) {
   const find = (cid) => {
     for (const g of S[cid] || []) {
       const row = g.rows.find((x) => x.id === String(teamId));
-      if (row) return { row, cid: Number(cid) };
+      // Plusieurs groupes (conférences MLS, poules haute / basse) : on précise lequel
+      if (row) return { row, cid: Number(cid), group: (S[cid].length > 1 && g.name) || null };
     }
     return null;
   };
@@ -305,7 +306,7 @@ function teamInfoHTML(m) {
   const side = (teamId, cls) => {
     const st = standingOf(teamId, m.c);
     const rank = st ? `<span class="ti-rank" style="--q:${st.row.q || "var(--border)"}">${ordinal(st.row.r)}</span>
-      <span class="muted small">${st.row.pts} pts${st.cid !== m.c ? ` · ${esc(comp(st.cid).name)}` : ""}</span>` : "";
+      <span class="muted small">${st.row.pts} pts${st.cid !== m.c ? ` · ${esc(comp(st.cid).name)}` : ""}${st.group ? ` · ${esc(st.group)}` : ""}</span>` : "";
     return `<div class="ti ${cls}"><div class="ti-line">${rank}</div>${formHTML(teamId)}</div>`;
   };
   const tableComp = standingOf(m.h, m.c)?.cid ?? standingOf(m.a, m.c)?.cid;
