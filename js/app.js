@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081350";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081356";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -274,6 +274,71 @@ async function saveBoost(id) {
   }
 }
 
+// ================================================================ Classement et forme des équipes
+
+const EURO_CUPS = new Set([42, 73, 10216]);
+const ordinal = (r) => (r === 1 ? "1er" : `${r}e`);
+// Rang d'une équipe dans la compétition du match ; pour une coupe d'Europe sans classement, son championnat
+function standingOf(teamId, compId) {
+  const S = state.data.standings || {};
+  const find = (cid) => {
+    for (const g of S[cid] || []) {
+      const row = g.rows.find((x) => x.id === String(teamId));
+      if (row) return { row, cid: Number(cid) };
+    }
+    return null;
+  };
+  return find(compId) || Object.keys(S).filter((c) => !EURO_CUPS.has(Number(c))).map(find).find(Boolean) || null;
+}
+
+const RESULT_LABEL = { V: "Victoire", N: "Nul", D: "Défaite" };
+// 5 derniers matchs, du plus ancien au plus récent (le dernier est souligné)
+function formHTML(teamId) {
+  const f = [...(state.data.form?.[teamId] || [])].reverse();
+  if (!f.length) return `<span class="muted small">–</span>`;
+  return `<span class="form">${f.map(([res, gf, ga, opp, home, day], i) =>
+    `<i class="fr ${res} ${i === f.length - 1 ? "last" : ""}" title="${RESULT_LABEL[res]} ${gf}-${ga} ${home ? "contre" : "à"} ${esc(opp)} · ${new Date(day).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}">${res}</i>`).join("")}</span>`;
+}
+
+function teamInfoHTML(m) {
+  if (!state.data.standings && !state.data.form) return "";
+  const side = (teamId, cls) => {
+    const st = standingOf(teamId, m.c);
+    const rank = st ? `<span class="ti-rank" style="--q:${st.row.q || "var(--border)"}">${ordinal(st.row.r)}</span>
+      <span class="muted small">${st.row.pts} pts${st.cid !== m.c ? ` · ${esc(comp(st.cid).name)}` : ""}</span>` : "";
+    return `<div class="ti ${cls}"><div class="ti-line">${rank}</div>${formHTML(teamId)}</div>`;
+  };
+  const tableComp = standingOf(m.h, m.c)?.cid ?? standingOf(m.a, m.c)?.cid;
+  return `<div class="team-info">
+    ${side(m.h, "home")}
+    ${tableComp ? `<button class="ti-btn" data-table="${tableComp}" data-hl="${m.h},${m.a}">Classement</button>` : "<span></span>"}
+    ${side(m.a, "away")}
+  </div>`;
+}
+
+function showTable(cid, highlight) {
+  const groups = state.data.standings?.[cid] || [];
+  const c = comp(Number(cid));
+  const hl = new Set(highlight);
+  const legend = groups.flatMap((g) => g.legend || []).filter((l, i, a) => a.findIndex((x) => x.t === l.t) === i);
+  $("#table-modal").innerHTML = `<div class="legend-head">
+      <h2>${c.flag} ${esc(c.name)}</h2>
+      <button class="rm" data-close-table aria-label="Fermer">✕</button>
+    </div>
+    ${groups.map((g) => `${groups.length > 1 && g.name ? `<h3 class="st-group">${esc(g.name)}</h3>` : ""}
+      <div class="st-table">
+        <div class="st-row st-head"><span>#</span><span>Équipe</span><span>J</span><span>V</span><span>N</span><span>D</span><span>Diff</span><span>Pts</span></div>
+        ${g.rows.map((x) => `<div class="st-row ${hl.has(x.id) ? "hl" : ""}" style="--q:${x.q || "transparent"}">
+          <span class="st-rank">${x.r}</span><span class="st-name">${esc(x.n || team(x.id)?.name || "")}</span>
+          <span>${x.p}</span><span>${x.w}</span><span>${x.d}</span><span>${x.l}</span>
+          <span>${x.gf - x.ga > 0 ? "+" : ""}${x.gf - x.ga}</span><b>${x.pts}</b>
+        </div>`).join("")}
+      </div>`).join("")}
+    ${legend.length ? `<div class="st-legend">${legend.map((l) => `<span><i style="background:${l.c}"></i>${esc(l.t)}</span>`).join("")}</div>` : ""}
+    ${groups.some((g) => g.computed) ? `<p class="hint">Classement recalculé à partir des résultats (sans éventuelles pénalités de points).</p>` : ""}`;
+  $("#table-modal").showModal();
+}
+
 function matchCard(m) {
   const h = team(m.h), a = team(m.a);
   const c = comp(m.c);
@@ -310,6 +375,7 @@ function matchCard(m) {
       </div>
       <span class="chev">▾</span>
     </button>
+    ${open ? teamInfoHTML(m) : ""}
     ${m.odds && m.oddsSrc !== "site" && !locked ? `<p class="odds-src">Cotes du flux international, à vérifier sur Unibet</p>` : ""}
     <div class="odds-row">${MATCH_MARKETS.map(oddBtn).join("")}</div>
     <div class="odds-row team">${TEAM_MARKETS.map(oddBtn).join("")}</div>
@@ -1284,6 +1350,8 @@ document.addEventListener("click", async (e) => {
       .catch(() => { box.hidden = false; box.value = text; box.select(); toast("Sélectionne le texte et copie-le"); });
   }
   else if (d.closeLegend !== undefined) $("#legend").close();
+  else if (d.table) showTable(d.table, d.hl.split(","));
+  else if (d.closeTable !== undefined) $("#table-modal").close();
   else if (d.slipWallet) { state.slipWallet = d.slipWallet; state.slipStake = null; renderSlip(); }
   else if (d.betWallet) { state.betWallet = d.betWallet; renderBets(); }
   else if (d.tx) addTransaction(d.tx, d.wallet || "real").catch((err) => { console.error(err); toast(`Erreur d'enregistrement (${err.code || err.message})`); });
@@ -1295,7 +1363,7 @@ document.addEventListener("click", async (e) => {
 });
 
 // Un clic sur le fond assombri ferme la légende
-document.addEventListener("click", (e) => { if (e.target.id === "legend" || e.target.id === "slip-sheet") e.target.close(); });
+document.addEventListener("click", (e) => { if (["legend", "slip-sheet", "table-modal"].includes(e.target.id)) e.target.close(); });
 
 document.addEventListener("input", (e) => {
   if (e.target.id === "slip-odds") state.slipOdds = e.target.value;

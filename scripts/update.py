@@ -230,6 +230,7 @@ def collect_fotmob(now):
             log(f"[{comp['name']}] indisponible")
             continue
         comp["season"] = d.get("details", {}).get("selectedSeason")
+        comp["table"] = parse_table(d)
         # Classements joueurs de la saison (buts, xG…) : servent au % de chances des buteurs
         comp["statUrls"] = {s.get("name"): s.get("fetchAllUrl")
                             for s in (d.get("stats") or {}).get("players") or [] if s.get("fetchAllUrl")}
@@ -305,6 +306,89 @@ def empty_stats():
     # xf / xa / nx : xG pour et contre, sur les nx matchs où FotMob les fournit
     return {"n": 0, "gf": 0, "ga": 0, "sf": [0] * 6, "sa": [0] * 6, "btts": 0, "o15": 0, "o25": 0, "f2": 0, "a2": 0,
             "xf": 0, "xa": 0, "nx": 0}
+
+
+def parse_table(d):
+    """Classement officiel FotMob d'une compétition : une liste de groupes (un seul pour un championnat,
+    plusieurs pour les conférences MLS par ex.). Chaque ligne : id, rang, joués, V/N/D, buts, points, couleur de zone."""
+    groups, seen = [], set()
+
+    def rows_of(lst):
+        out = []
+        for t in lst or []:
+            try:
+                gf, ga = (int(x) for x in str(t.get("scoresStr", "0-0")).split("-")[:2])
+            except ValueError:
+                gf = ga = 0
+            if t.get("id") is None or t.get("pts") is None:
+                continue
+            out.append({"id": str(t["id"]), "n": t.get("shortName") or t.get("name"), "r": t.get("idx"), "p": t.get("played"), "w": t.get("wins"),
+                        "d": t.get("draws"), "l": t.get("losses"), "gf": gf, "ga": ga, "pts": t.get("pts"),
+                        "q": t.get("qualColor")})
+        return out
+
+    def walk(o, name=None):
+        if isinstance(o, dict):
+            name = o.get("leagueName") or name
+            tb = o.get("table")
+            if isinstance(tb, dict) and isinstance(tb.get("all"), list):
+                rows = rows_of(tb["all"])
+                key = (name, tuple(x["id"] for x in rows))
+                if rows and key not in seen:
+                    seen.add(key)
+                    legend = [{"t": l.get("title"), "c": l.get("color")} for l in o.get("legend") or [] if l.get("title")]
+                    groups.append({"name": name, "rows": rows, "legend": legend})
+            for v in o.values():
+                walk(v, name)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v, name)
+
+    walk(d.get("table"))
+    return groups
+
+
+def computed_table(cache, comp_id, teams):
+    """Classement recalculé à partir des résultats en cache (si FotMob ne fournit pas le sien) :
+    3 points la victoire, 1 le nul ; sans pénalités ni phases finales."""
+    t = {}
+    for m in cache.values():
+        if m["c"] != comp_id:
+            continue
+        hg, ag = regulation_score(m)
+        for tid, f, a in ((m["h"], hg, ag), (m["a"], ag, hg)):
+            row = t.setdefault(tid, {"id": tid, "n": teams.get(tid, ""), "p": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "pts": 0, "q": None})
+            row["p"] += 1
+            row["gf"] += f
+            row["ga"] += a
+            res = "w" if f > a else "d" if f == a else "l"
+            row[res] += 1
+            row["pts"] += {"w": 3, "d": 1, "l": 0}[res]
+    rows = sorted(t.values(), key=lambda x: (-x["pts"], -(x["gf"] - x["ga"]), -x["gf"]))
+    for i, row in enumerate(rows):
+        row["r"] = i + 1
+    return [{"name": None, "rows": rows, "legend": [], "computed": True}] if rows else []
+
+
+def team_form(cache, team_ids, teams, n=5):
+    """Forme du moment : les n derniers matchs de chaque équipe, toutes compétitions suivies confondues.
+    [résultat V/N/D, buts pour, buts contre, adversaire, 1 = à domicile, date, compétition]"""
+    by_team = {tid: [] for tid in team_ids}
+    for m in cache.values():
+        for tid, home in ((m["h"], 1), (m["a"], 0)):
+            if tid in by_team:
+                by_team[tid].append((m, home))
+    form = {}
+    for tid, lst in by_team.items():
+        lst.sort(key=lambda x: x[0]["t"], reverse=True)
+        out = []
+        for m, home in lst[:n]:
+            hg, ag = regulation_score(m)
+            f, a = (hg, ag) if home else (ag, hg)
+            opp = m["a"] if home else m["h"]
+            out.append(["V" if f > a else "N" if f == a else "D", f, a, teams.get(opp, ""), home, m["t"][:10], m["c"]])
+        form[tid] = out
+    return form
 
 
 def team_stats(cache, team_ids):
@@ -802,6 +886,9 @@ def main():
         "results": results,
         "scorers": scorers,
         "boosts": get_boosts(),
+        # Classements (officiels FotMob, sinon recalculés) et forme des équipes des matchs à venir
+        "standings": {str(c["id"]): (c.get("table") or computed_table(cache, c["id"], teams)) for c in COMPETITIONS},
+        "form": team_form(cache, involved, teams),
     }
     OUT_FILE.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")))
     CACHE_FILE.write_text(json.dumps({"matches": cache}, separators=(",", ":")))
