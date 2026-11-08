@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081400";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081407";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -39,6 +39,7 @@ const state = {
   players: [],             // pseudos des joueurs
   lbUnavailable: false,    // règles Firestore du classement pas encore publiées
   lbPeriod: "month",
+  betsLoaded: false,       // premier chargement de mes paris reçu (évite des suggestions provisoires)
   combos: [],
   combosOpen: false,       // bloc des combinés suggérés replié par défaut
   reliability: null,       // résultat de « Fiabilité de mes avis », calculé à la demande
@@ -142,6 +143,8 @@ function matchLegs(m) {
 const comboSort = () => state.settings.comboSort || "p";
 
 function renderCombos() {
+  // Tant que mes paris ne sont pas chargés, on ne sait pas quels matchs exclure : rien plutôt qu'un nombre qui change
+  if (!state.betsLoaded) { $("#combos").innerHTML = ""; return; }
   const days = [0, 1].map((d) => { const x = new Date(); x.setDate(x.getDate() + d); return localDay(x); });
   // Matchs déjà joués dans un pari en cours : on ne les repropose pas
   const taken = new Set(state.bets.filter((b) => !isFun(b) && betStatus(b) === "pending").flatMap((b) => b.selections.map((s) => s.matchId)));
@@ -226,6 +229,7 @@ function boostValue(b) {
 const BOOST_LABEL = { yes: "Intéressant", maybe: "Correct" };
 
 function renderBoosts() {
+  if (!state.betsLoaded) { $("#boosts").innerHTML = ""; return; }
   const now = Date.now();
   const taken = new Set(state.bets.flatMap((b) => b.selections.map((s) => s.matchId)));
   const boosts = (state.data?.boosts || []).filter((b) => new Date(b.t) > now && !taken.has(`cb:${b.id}`))
@@ -1422,7 +1426,7 @@ async function main() {
     syncPlayer();
   });
   const betsChanged = () => { mergeBets(); persistScores(state.bets); renderBets(); renderAccount(); if (state.data) { renderMatches(); renderSlip(); } };
-  onBets((bets) => { state.privBets = bets; betsChanged(); });
+  onBets((bets) => { state.privBets = bets; state.betsLoaded = true; betsChanged(); });
   onFunBets((docs) => { state.lbUnavailable = docs === null; state.funbets = docs || []; betsChanged(); });
   onPlayers((docs) => { state.players = docs || []; syncPlayer(); if (state.betWallet === FUN) renderBets(); });
   onTransactions((txs) => { state.transactions = txs; renderAccount(); if (state.data) renderSlip(); });
