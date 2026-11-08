@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081343";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611081346";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -555,9 +555,6 @@ function distHTML(m) {
       <div class="h" style="text-align:left">Ses matchs</div><div class="h">Buts/m</div><div class="h">BTTS</div><div class="h">Match +1,5</div><div class="h">Match +2,5</div><div class="h">A marqué 2+</div>
       ${kpi(m.h, H.name, hs)}${kpi(m.a, A.name, as)}
     </div>
-    <p class="dist-note">Part des matchs de chaque équipe cette saison${mode === "all" ? "" : " (à domicile pour la 1ʳᵉ, à l'extérieur pour la 2ᵉ)"} :
-      « Match +1,5 » = au moins 2 buts dans le match, les 2 équipes confondues ; « A marqué 2+ » = l'équipe elle-même a marqué au moins 2 buts.
-      Les % des cotes et de « Mon avis » sont mes chances estimées pour ce match précis (moitié mes stats, moitié la cote Unibet).</p>
   </div>`;
 }
 
