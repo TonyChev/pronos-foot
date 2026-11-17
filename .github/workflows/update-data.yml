@@ -29,4 +29,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/
           git diff --cached --quiet || git commit -m "Données du $(date -u +'%Y-%m-%d %H:%M') UTC"
-          git push
+          # Si main a bougé pendant le run (autre push), on récupère puis on réessaie
+          for i in 1 2 3; do
+            git pull --rebase && git push && exit 0
+            sleep 5
+          done
+          exit 1
