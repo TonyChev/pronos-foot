@@ -18,12 +18,28 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+      # Le planning GitHub sert de secours au déclencheur externe (toutes les 30 min).
+      # S'il passe juste après une mise à jour, il ne refait pas le travail.
+      - name: Données déjà fraîches ?
+        id: fresh
+        if: github.event_name == 'schedule'
+        run: |
+          git fetch -q --depth=1 origin main
+          age=$(( $(date +%s) - $(git log -1 --format=%ct FETCH_HEAD) ))
+          echo "Dernière mise à jour de main il y a $((age / 60)) min"
+          if [ "$age" -lt 1500 ]; then
+            echo "Moins de 25 min : rien à faire."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-python@v6
+        if: steps.fresh.outputs.skip != 'true'
         with:
           python-version: "3.12"
       - name: Collecte (FotMob + cotes Unibet)
+        if: steps.fresh.outputs.skip != 'true'
         run: python scripts/update.py
       - name: Enregistrement
+        if: steps.fresh.outputs.skip != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
