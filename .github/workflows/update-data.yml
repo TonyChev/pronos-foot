@@ -27,11 +27,16 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/
-          git diff --cached --quiet || git commit -m "Données du $(date -u +'%Y-%m-%d %H:%M') UTC"
-          # Si main a bougé pendant le run (autre push), on récupère puis on réessaie
           for i in 1 2 3; do
-            git pull --rebase && git push && exit 0
-            sleep 5
+            git add data/
+            git diff --cached --quiet && exit 0   # rien de nouveau à enregistrer
+            git commit -q -m "Données du $(date -u +'%Y-%m-%d %H:%M') UTC"
+            git push && exit 0
+            # main a bougé pendant le run (autre run ou autre push). Les fichiers de
+            # data/ tiennent sur une ligne : impossible de fusionner. On repart donc
+            # de la version distante et on refait la collecte par-dessus.
+            git fetch origin main
+            git reset --hard origin/main
+            python scripts/update.py
           done
           exit 1
