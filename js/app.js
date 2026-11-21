@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611102053";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611212100";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -755,7 +755,7 @@ function renderSlip() {
     <p class="hint">Cote calculée : ${String(suggested).replace(".", ",")}. Corrige-la avec la cote exacte affichée par Unibet${sameMatch ? " (2 paris sur un même match = « Bet Builder » : la cote réelle est différente du produit)" : ""}.</p>
     <div class="summary-line"><span>Gain potentiel</span><b id="slip-gain">${Number.isFinite(gain) ? fmtEur(gain) : "–"}</b></div>
     ${needLogin ? `<button class="btn" data-login>Se connecter pour enregistrer</button>`
-      : `<button class="btn" id="save-bet">${fun ? "Enregistrer mon pari freebet" : "Enregistrer mon pari"}</button>`}
+      : `<button class="btn" id="save-bet" ${savingBet ? "disabled" : ""}>${savingBet ? "Enregistrement…" : fun ? "Enregistrer mon pari freebet" : "Enregistrer mon pari"}</button>`}
     <button class="btn secondary" id="clear-slip" style="margin-top:8px">Vider le bulletin</button>
   </div>`;
 }
@@ -770,7 +770,12 @@ function renderSlipBar(sels = slipSelections(), count = sels.reduce((n, s) => n 
     <button class="btn" data-open-slip>${count > 1 ? "Créer le combiné" : "Créer le pari"}</button>`;
 }
 
+// Vrai pendant l'enregistrement : Firestore met à jour la liste des paris avant la confirmation du serveur,
+// ce qui redessine le bulletin ; sans ce verrou le bouton redevenait actif et un 2e appui créait un doublon.
+let savingBet = false;
+
 async function saveBet() {
+  if (savingBet) return;
   const sels = slipSelections();
   const odds = parseNum($("#slip-odds").value);
   const stake = parseNum($("#slip-stake").value);
@@ -786,8 +791,8 @@ async function saveBet() {
       markets, score: null,
     })),
   };
-  const btn = $("#save-bet");
-  btn.disabled = true;
+  savingBet = true;
+  renderSlip();
   try {
     if (w === FUN) {
       // Pari Freebet : partagé pour le classement (coup d'envoi enregistré : un pari après le début du match ne compte pas)
@@ -809,7 +814,9 @@ async function saveBet() {
   } catch (e) {
     console.error(e);
     toast(`Erreur d'enregistrement (${e.code || e.message})`);
-    btn.disabled = false;
+  } finally {
+    savingBet = false;
+    renderSlip();
   }
 }
 
