@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611212100";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611252300";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
