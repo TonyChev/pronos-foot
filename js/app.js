@@ -238,8 +238,8 @@ function renderBoosts() {
   // Les boosts sont les seuls paris qui battent la marge d'Unibet par construction :
   // le bloc s'ouvre tout seul (et passe avant les suggestions) dès qu'une offre est vraiment intéressante.
   const good = boosts.filter((b) => b.level === "yes").length;
-  $("#boosts").innerHTML = `<details class="card combos boosts" ${state.boostsOpen ?? good > 0 ? "open" : ""}>
-    <summary><h2>Cotes boostées Unibet (${boosts.length})${good ? ` <span class="boost-badge">★ ${good} intéressante${good > 1 ? "s" : ""}</span>` : ""}</h2></summary>
+  $("#boosts").innerHTML = `<details class="card combos boosts" ${state.boostsOpen ? "open" : ""}>
+    <summary><h2><span>Cotes boostées Unibet (${boosts.length})</span>${good ? ` <span class="boost-badge">★ ${good} intéressante${good > 1 ? "s" : ""}</span>` : ""}</h2></summary>
     <p class="hint">Mes meilleurs paris : le boost paie plus que le vrai risque, alors que les autres paris paient la marge d'Unibet (~12 %).
       Seules les offres à valeur positive sont affichées. Valeur estimée d'après le boost et la marge habituelle d'Unibet, sans analyse du match.
       Mise conseillée : <b>${fmtEur(suggestedStake())}</b> (dans la limite du plafond Unibet). Le règlement se fait à la main dans Mes paris.</p>
