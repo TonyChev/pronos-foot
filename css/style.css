@@ -227,6 +227,8 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 .combo-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; font-size: 13.5px; }
 .combo-foot b { font-family: var(--display); font-size: 16px; white-space: nowrap; }
 .combos .chip.active { background: var(--pink); color: #fff; }
+.combo-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; flex: none; }
+.combos .chip.decline { background: #263236; color: var(--hero-text); }
 
 /* ---------- Répartition des buts (façon Sofascore) ---------- */
 .dist { background: var(--surface-2); margin: 0 8px 10px; border-radius: 4px; padding: 14px 12px; }

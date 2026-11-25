@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611252300";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611252330";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -232,11 +232,12 @@ function renderBoosts() {
   if (!state.betsLoaded) { $("#boosts").innerHTML = ""; return; }
   const now = Date.now();
   const taken = new Set(state.bets.flatMap((b) => b.selections.map((s) => s.matchId)));
-  const boosts = (state.data?.boosts || []).filter((b) => new Date(b.t) > now && !taken.has(`cb:${b.id}`))
+  const declined = new Set(state.settings.declinedBoosts || []);
+  const boosts = (state.data?.boosts || []).filter((b) => new Date(b.t) > now && !taken.has(`cb:${b.id}`) && !declined.has(String(b.id)))
     .map((b) => ({ ...b, ...boostValue(b) })).filter((b) => b.edge >= 0).sort((x, y) => y.edge - x.edge);
   if (!boosts.length) { $("#boosts").innerHTML = ""; return; }
   // Les boosts sont les seuls paris qui battent la marge d'Unibet par construction :
-  // le bloc s'ouvre tout seul (et passe avant les suggestions) dès qu'une offre est vraiment intéressante.
+  // ils passent avant les suggestions ; le bloc reste replié tant qu'on ne l'ouvre pas.
   const good = boosts.filter((b) => b.level === "yes").length;
   $("#boosts").innerHTML = `<details class="card combos boosts" ${state.boostsOpen ? "open" : ""}>
     <summary><h2><span>Cotes boostées Unibet (${boosts.length})</span>${good ? ` <span class="boost-badge">★ ${good} intéressante${good > 1 ? "s" : ""}</span>` : ""}</h2></summary>
@@ -252,10 +253,22 @@ function renderBoosts() {
       </div>
       <div class="combo-foot">
         <span>${fmtOdds(b.before)} → <b>${fmtOdds(b.after)}</b> · chances ≈ ${Math.round(b.p * 100)} % · valeur +${Math.round(b.edge * 100)} %</span>
-        <button class="chip active" data-boost="${b.id}">J'ai parié</button>
+        <span class="combo-actions">
+          <button class="chip decline" data-decline-boost="${b.id}">Pas pour moi</button>
+          <button class="chip active" data-boost="${b.id}">J'ai parié</button>
+        </span>
       </div>
     </div>`).join("")}
   </details>`;
+}
+
+// Offre déclinée : masquée sur tous mes appareils ; on ne garde que les ids d'offres encore en cours.
+function declineBoost(id) {
+  const live = new Set((state.data?.boosts || []).filter((b) => new Date(b.t) > Date.now()).map((b) => String(b.id)));
+  const declinedBoosts = [...new Set([...(state.settings.declinedBoosts || []), id])].filter((x) => live.has(x));
+  state.settings = { ...state.settings, declinedBoosts };
+  renderBoosts();
+  store.saveSettings({ declinedBoosts }).then(() => toast("Offre masquée")).catch((e) => { console.error(e); toast("Erreur d'enregistrement"); });
 }
 
 async function saveBoost(id) {
@@ -1341,6 +1354,8 @@ document.addEventListener("click", async (e) => {
     toast(c.legs.length > 1 ? "Combiné ajouté au bulletin" : "Pari ajouté au bulletin");
   } else if (d.comboSort) {
     store.saveSettings({ comboSort: d.comboSort }).catch(console.error);
+  } else if (d.declineBoost !== undefined) {
+    declineBoost(d.declineBoost);
   } else if (d.boost !== undefined) {
     saveBoost(d.boost);
   } else if (t.id === "clear-slip") {
