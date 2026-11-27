@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611272345";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611272355";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -186,7 +186,7 @@ function renderCombos() {
   const dayLabel = (iso) => (localDay(new Date(iso)) === days[0] ? "Auj." : "Demain");
   const mine = realGoalsResult();
   $("#combos").innerHTML = `<details class="card combos" ${state.combosOpen ? "open" : ""}>
-    <summary><h2>Paris suggérés, pour le plaisir (${state.combos.length})</h2></summary>
+    <summary><h2><span>Pour le plaisir (${state.combos.length})</span></h2></summary>
     <p class="hint warn">⚠ Pas rentables jusqu'ici. Rejoués sur ~500 matchs avec leur cote Unibet, tous les paris de buts
       (BTTS, +1,5, +2,5, équipe +1,5, et leurs contraires) perdent en moyenne 10 à 20 € pour 100 € misés : la marge d'Unibet,
       que mes stats ne parviennent pas à battre${mine ? `. Tes ${mine.n} paris réels hors boosts : ${mine.roi > 0 ? "+" : ""}${Math.round(mine.roi * 100)} €
@@ -246,7 +246,7 @@ function renderBoosts() {
   // ils passent avant les suggestions ; le bloc reste replié tant qu'on ne l'ouvre pas.
   const good = boosts.filter((b) => b.level === "yes").length;
   $("#boosts").innerHTML = `<details class="card combos boosts" ${state.boostsOpen ? "open" : ""}>
-    <summary><h2><span>Cotes boostées Unibet (${boosts.length})</span>${good ? ` <span class="boost-badge">★ ${good} intéressante${good > 1 ? "s" : ""}</span>` : ""}</h2></summary>
+    <summary><h2><span>Cotes boostées (${boosts.length})</span>${good ? `<span class="boost-badge">★ ${good} à jouer</span>` : ""}</h2></summary>
     <p class="hint">Les seuls paris rentables de l'app : le boost paie plus que le vrai risque, alors que les autres paris paient la marge d'Unibet (~12 %).
       Seules les offres à valeur positive sont affichées. Valeur estimée d'après le boost et la marge habituelle d'Unibet, sans analyse du match.
       Mise conseillée : <b>${fmtEur(suggestedStake())}</b> (dans la limite du plafond Unibet). Le règlement se fait à la main dans Mes paris.</p>

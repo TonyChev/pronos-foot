@@ -214,8 +214,8 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 .combos .bad { color: #ff5c8d; }
 .combos summary { list-style: none; cursor: pointer; }
 .combos summary::-webkit-details-marker { display: none; }
-.combos summary h2 { margin: 0; display: flex; align-items: center; gap: 8px; text-transform: uppercase; font-style: italic; }
-.combos summary h2 > span:first-child { flex: 1; }
+.combos summary h2 { margin: 0; font-size: 17px; display: flex; align-items: center; gap: 8px; text-transform: uppercase; font-style: italic; }
+.combos summary h2 > span:first-child { flex: 1; min-width: 0; padding-right: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .combos summary h2::after { content: "▾"; flex: none; color: var(--aqua); font-size: 14px; font-style: normal; }
 .combos[open] summary h2::after { content: "▴"; }
 .combo { border-top: 1px solid #263236; padding: 10px 0 4px; margin-top: 8px; }
