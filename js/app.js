@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611252330";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611272200";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -1137,6 +1137,7 @@ function renderProfile() {
     </div>
     <button class="btn secondary" data-tx="adjust" style="margin-top:8px">Corriger le solde</button>
   </div>
+  ${bilanHTML()}
   <div class="card fun-wallet">
     <h2>🎲 Portefeuille Freebet</h2>
     <p class="hint">Totalement fictif : pour t'amuser avec des simples et des combinés sans rien miser sur Unibet.
@@ -1197,6 +1198,54 @@ async function addTransaction(type, w = "real") {
 
 function renderAccount() { renderWallet(); renderProfile(); }
 
+// ================================================================ Bilan par type de pari et par cote (argent réel uniquement)
+
+const ODDS_BANDS = [[1, 1.3], [1.3, 1.5], [1.5, 1.8], [1.8, 2.3], [2.3, 3], [3, 4], [4, Infinity]];
+const fmtDec = (v) => String(v).replace(".", ",");
+const bandLabel = (lo, hi) => (lo === 1 ? `moins de ${fmtDec(hi.toFixed(2))}` : hi === Infinity ? `${fmtDec(lo.toFixed(2))} et plus`
+  : `${fmtDec(lo.toFixed(2))} – ${fmtDec(hi.toFixed(2))}`);
+const roiSpan = (r) => `<b class="${r > 0 ? "pos" : r < 0 ? "neg" : ""}">${r > 0 ? "+" : ""}${Math.round(r * 100)}%</b>`;
+const BET_TYPES = { btts: "BTTS", o15: "+1,5 buts", o25: "+2,5 buts", h15: "Domicile +1,5", a15: "Extérieur +1,5" };
+
+function betType(b) {
+  const mks = b.selections.flatMap((s) => s.markets);
+  if (mks.length !== 1) return "Combiné";
+  const k = mks[0].k;
+  return isBoost(k) ? "Cote boostée" : isScorer(k) ? "Buteur" : BET_TYPES[k] || "Autre";
+}
+
+function bilanHTML() {
+  // Paris réglés du portefeuille réel seulement (les remboursés ne comptent pas)
+  const bets = state.bets.filter(inWallet("real")).map((b) => ({ ...b, status: betStatus(b) }))
+    .filter((b) => b.status === "won" || b.status === "lost");
+  if (!bets.length) return "";
+  const group = (keyOf, order) => {
+    const rows = new Map(order.map((k) => [k, { n: 0, won: 0, staked: 0, returned: 0 }]));
+    for (const b of bets) {
+      const r = rows.get(keyOf(b));
+      if (!r) continue;
+      r.n++; r.won += b.status === "won"; r.staked += b.stake; r.returned += betReturn(b);
+    }
+    return [...rows].filter(([, r]) => r.n);
+  };
+  const table = (title, rows) => `<div class="rel-table five">
+      <div class="h" style="text-align:left">${title}</div><div class="h">Paris</div><div class="h">Gagnés</div><div class="h">Résultat</div><div class="h">Rentab.</div>
+      ${rows.map(([label, r]) => `<div class="t">${esc(label)}</div><div class="v">${r.n}</div>
+        <div class="v">${pctSpan(Math.round((r.won / r.n) * 100))}</div>
+        <div class="v small ${r.returned - r.staked >= 0 ? "pos" : "neg"}">${r.returned - r.staked >= 0 ? "+" : "−"}${fmtEur(Math.abs(r.returned - r.staked))}</div>
+        <div class="v">${roiSpan((r.returned - r.staked) / r.staked)}</div>`).join("")}
+    </div>`;
+  const types = [...Object.values(BET_TYPES), "Buteur", "Cote boostée", "Combiné", "Autre"];
+  const bandOf = (b) => { const [lo, hi] = ODDS_BANDS.find(([lo, hi]) => b.odds >= lo && b.odds < hi) || ODDS_BANDS[0]; return bandLabel(lo, hi); };
+  return `<div class="card">
+    <h2>Mon bilan par type de pari</h2>
+    <p class="hint">Paris réels réglés uniquement (${bets.length}), sans les remboursés ni les paris Freebet.
+      « Rentab. » = gain ou perte pour 100 € misés. Sur peu de paris, ces chiffres varient beaucoup : attends une trentaine de paris par ligne avant d'en tirer une conclusion.</p>
+    ${table("Type", group(betType, types))}
+    <div style="margin-top:14px">${table("Cote", group(bandOf, ODDS_BANDS.map(([lo, hi]) => bandLabel(lo, hi))))}</div>
+  </div>`;
+}
+
 // ================================================================ Retours pour Claude (profil du propriétaire)
 
 const OWNER = "anthony.chev@gmail.com";
@@ -1236,6 +1285,9 @@ async function computeReliability() {
   const withOdds = Object.fromEntries(ALL_MARKETS.map((k) => [k, blank()]));
   // Paris simples à cote proche de 2 que j'aurais suggérés (cotes Unibet d'avant-match connues)
   const singles = { ...blank(), staked: 0, returned: 0 };
+  // Tous les paris possibles à cote entre 1,30 et 4, par tranche : jusqu'où montent vraiment les chances ?
+  const bands = ODDS_BANDS.slice(1, -1).map(([lo, hi]) => ({ lo, hi, ...blank(), returned: 0 }));
+  let sure = 0;
   let replayed = 0, oddsMatches = 0;
   for (const m of matches) {
     const hg = m.g.filter((g) => g[1]).length, ag = m.g.length - hg;
@@ -1253,6 +1305,8 @@ async function computeReliability() {
         if (o >= TARGET_ODDS[0] && o <= TARGET_ODDS[1] && est[k] >= 0.5 && !doubtfulOdds(m.o, est, k)) {
           singles.n++; singles.won += won; singles.sumP += est[k]; singles.staked += 1; singles.returned += won ? o : 0;
         }
+        const band = bands.find((b) => o >= b.lo && o < b.hi);
+        if (band) { band.n++; band.won += won; band.sumP += est[k]; band.returned += won ? o : 0; if (est[k] >= 0.8) sure++; }
       }
     }
     for (const [side, s, own, opp, x] of [["home", H, hg, ag, m.x], ["away", A, ag, hg, m.x && [m.x[1], m.x[0]]]]) {
@@ -1263,7 +1317,7 @@ async function computeReliability() {
       }
     }
   }
-  return { season, withOdds, singles, replayed, oddsMatches, total: matches.length, at: Date.now() };
+  return { season, withOdds, singles, bands, sure, replayed, oddsMatches, total: matches.length, at: Date.now() };
 }
 
 function reliabilityHTML(r) {
@@ -1284,6 +1338,14 @@ function reliabilityHTML(r) {
     <p class="small" style="margin-top:14px"><b>Paris simples à cote proche de 2</b> (comme mes suggestions) :
       ${s.n ? `${s.n} paris, ${pctSpan(Math.round((s.won / s.n) * 100))} gagnés pour ${Math.round((s.sumP / s.n) * 100)}% annoncés ·
         <b class="${roi >= 0 ? "pos" : "neg"}">${roi >= 0 ? "+" : ""}${Math.round(roi)}%</b> de rentabilité` : "pas encore assez de matchs avec cote."}</p>
+    ${r.bands ? `<p class="small" style="margin-top:14px"><b>Tous les paris à cote entre 1,30 et 4</b>, par tranche de cote :</p>
+    <div class="rel-table five"><div class="h" style="text-align:left">Cote</div><div class="h">Paris</div><div class="h">Annoncé</div><div class="h">Réel</div><div class="h">Rentab.</div>
+      ${r.bands.map((b) => `<div class="t">${bandLabel(b.lo, b.hi)}</div><div class="v">${b.n}</div>
+        <div class="v">${b.n ? `${Math.round((b.sumP / b.n) * 100)}%` : "–"}</div>
+        <div class="v">${b.n ? pctSpan(Math.round((b.won / b.n) * 100)) : "–"}</div>
+        <div class="v">${b.n ? roiSpan((b.returned - b.n) / b.n) : "–"}</div>`).join("")}</div>
+    <p class="hint">Paris annoncés à 80 % ou plus avec une cote d'au moins 1,30 : <b>${r.sure}</b>. Plus la cote monte, plus les chances baissent :
+      un pari « sûr à 80 % » à cote 1,30 ou plus n'existe quasiment pas.</p>` : ""}
     <p class="hint">« Annoncé » = mes chances moyennes, « Réel » = part des paris gagnés. Les deux doivent être proches.
       Les buteurs ne sont pas encore rejoués. Calculé le ${new Date(r.at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}.</p>
     <button class="link-btn" data-reliability>Recalculer</button>`;
