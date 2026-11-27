@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611272300";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611272345";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -41,7 +41,8 @@ const state = {
   lbPeriod: "month",
   betsLoaded: false,       // premier chargement de mes paris reçu (évite des suggestions provisoires)
   combos: [],
-  combosOpen: false,       // bloc des combinés suggérés replié par défaut
+  combosOpen: true,        // blocs « Paris suggérés » et « Cotes boostées » dépliés par défaut ;
+  boostsOpen: true,        // seul un appui sur leur titre les replie (jusqu'au prochain chargement de l'app)
   reliability: null,       // résultat de « Fiabilité de mes avis », calculé à la demande
   user: null,
 };
@@ -244,7 +245,7 @@ function renderBoosts() {
   // Les boosts sont les seuls paris qui battent la marge d'Unibet par construction :
   // ils passent avant les suggestions ; le bloc reste replié tant qu'on ne l'ouvre pas.
   const good = boosts.filter((b) => b.level === "yes").length;
-  $("#boosts").innerHTML = `<details class="card combos boosts" ${state.boostsOpen ?? good > 0 ? "open" : ""}>
+  $("#boosts").innerHTML = `<details class="card combos boosts" ${state.boostsOpen ? "open" : ""}>
     <summary><h2><span>Cotes boostées Unibet (${boosts.length})</span>${good ? ` <span class="boost-badge">★ ${good} intéressante${good > 1 ? "s" : ""}</span>` : ""}</h2></summary>
     <p class="hint">Les seuls paris rentables de l'app : le boost paie plus que le vrai risque, alors que les autres paris paient la marge d'Unibet (~12 %).
       Seules les offres à valeur positive sont affichées. Valeur estimée d'après le boost et la marge habituelle d'Unibet, sans analyse du match.
@@ -1486,8 +1487,15 @@ document.addEventListener("toggle", (e) => {
     if (e.target.open) state.scorersOpen.add(id); else state.scorersOpen.delete(id);
     return;
   }
-  if (e.target.classList?.contains("boosts")) state.boostsOpen = e.target.open;
-  else if (e.target.classList?.contains("combos")) state.combosOpen = e.target.open;
+}, true);
+
+// Pliage des 2 blocs du haut : on ne retient que l'appui de l'utilisateur sur le titre
+// (les événements « toggle » émis quand l'app redessine le bloc ne doivent pas changer l'état)
+document.addEventListener("click", (e) => {
+  const details = e.target.closest?.("summary")?.parentElement;
+  if (!details?.classList.contains("combos")) return;
+  if (details.classList.contains("boosts")) state.boostsOpen = !details.open;
+  else state.combosOpen = !details.open;
 }, true);
 
 document.addEventListener("change", (e) => {
