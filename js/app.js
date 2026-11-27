@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611272235";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611272300";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -183,11 +183,16 @@ function renderCombos() {
   // Plus rien à suggérer (tout est déjà parié, ou rien d'assez sûr) : le bloc disparaît
   if (!state.combos.length) { $("#combos").innerHTML = ""; return; }
   const dayLabel = (iso) => (localDay(new Date(iso)) === days[0] ? "Auj." : "Demain");
+  const mine = realGoalsResult();
   $("#combos").innerHTML = `<details class="card combos" ${state.combosOpen ? "open" : ""}>
-    <summary><h2>Mes paris suggérés (${state.combos.length})</h2></summary>
+    <summary><h2>Paris suggérés, pour le plaisir (${state.combos.length})</h2></summary>
+    <p class="hint warn">⚠ Pas rentables jusqu'ici. Rejoués sur ~500 matchs avec leur cote Unibet, tous les paris de buts
+      (BTTS, +1,5, +2,5, équipe +1,5, et leurs contraires) perdent en moyenne 10 à 20 € pour 100 € misés : la marge d'Unibet,
+      que mes stats ne parviennent pas à battre${mine ? `. Tes ${mine.n} paris réels hors boosts : ${mine.roi > 0 ? "+" : ""}${Math.round(mine.roi * 100)} €
+      pour 100 € misés` : ""}. Pour gagner de l'argent, privilégie les cotes boostées ; ces suggestions, à la plus petite mise.</p>
     <p class="hint">Paris simples d'aujourd'hui et de demain à cote proche de 2 (entre 1,80 et 2,30) :
       un pari gagné compense un pari perdu. Pas de combinés : la marge d'Unibet se paierait sur chaque match.
-      Mise conseillée : <b>${fmtEur(suggestedStake())}</b>. Marchés de buts et buteurs, sans les paris
+      Marchés de buts et buteurs, sans les paris
       sur lesquels Unibet est bien moins confiant que moi ; les matchs déjà dans un pari en cours sont exclus.</p>
     <div class="combo-sort">
       <span class="muted small">Trier par</span>
@@ -239,9 +244,9 @@ function renderBoosts() {
   // Les boosts sont les seuls paris qui battent la marge d'Unibet par construction :
   // ils passent avant les suggestions ; le bloc reste replié tant qu'on ne l'ouvre pas.
   const good = boosts.filter((b) => b.level === "yes").length;
-  $("#boosts").innerHTML = `<details class="card combos boosts" ${state.boostsOpen ? "open" : ""}>
+  $("#boosts").innerHTML = `<details class="card combos boosts" ${state.boostsOpen ?? good > 0 ? "open" : ""}>
     <summary><h2><span>Cotes boostées Unibet (${boosts.length})</span>${good ? ` <span class="boost-badge">★ ${good} intéressante${good > 1 ? "s" : ""}</span>` : ""}</h2></summary>
-    <p class="hint">Mes meilleurs paris : le boost paie plus que le vrai risque, alors que les autres paris paient la marge d'Unibet (~12 %).
+    <p class="hint">Les seuls paris rentables de l'app : le boost paie plus que le vrai risque, alors que les autres paris paient la marge d'Unibet (~12 %).
       Seules les offres à valeur positive sont affichées. Valeur estimée d'après le boost et la marge habituelle d'Unibet, sans analyse du match.
       Mise conseillée : <b>${fmtEur(suggestedStake())}</b> (dans la limite du plafond Unibet). Le règlement se fait à la main dans Mes paris.</p>
     ${boosts.map((b) => `<div class="combo">
@@ -1214,6 +1219,14 @@ function betType(b) {
   if (mks.length !== 1) return "Combiné";
   const k = mks[0].k;
   return isBoost(k) ? "Cote boostée" : isScorer(k) ? "Buteur" : BET_TYPES[k] || "Autre";
+}
+
+// Résultat de mes paris réels réglés hors cotes boostées (null sous 20 paris : trop peu pour en parler)
+function realGoalsResult() {
+  const bets = state.bets.filter(inWallet("real")).filter((b) => !b.selections.some((s) => s.markets.some((mk) => isBoost(mk.k))))
+    .map((b) => ({ ...b, status: betStatus(b) })).filter((b) => b.status === "won" || b.status === "lost");
+  const staked = bets.reduce((t, b) => t + b.stake, 0);
+  return bets.length >= 20 && staked ? { n: bets.length, roi: (bets.reduce((t, b) => t + betReturn(b), 0) - staked) / staked } : null;
 }
 
 function bilanHTML() {
