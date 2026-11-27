@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611272200";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611272235";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -1204,7 +1204,9 @@ const ODDS_BANDS = [[1, 1.3], [1.3, 1.5], [1.5, 1.8], [1.8, 2.3], [2.3, 3], [3, 
 const fmtDec = (v) => String(v).replace(".", ",");
 const bandLabel = (lo, hi) => (lo === 1 ? `moins de ${fmtDec(hi.toFixed(2))}` : hi === Infinity ? `${fmtDec(lo.toFixed(2))} et plus`
   : `${fmtDec(lo.toFixed(2))} – ${fmtDec(hi.toFixed(2))}`);
-const roiSpan = (r) => `<b class="${r > 0 ? "pos" : r < 0 ? "neg" : ""}">${r > 0 ? "+" : ""}${Math.round(r * 100)}%</b>`;
+// Arrondi avant de choisir la couleur : un « 0 % » ou « 0,00 € » reste neutre, sans signe
+const roiSpan = (r) => { const p = Math.round(r * 100) || 0; return `<b class="${p > 0 ? "pos" : p < 0 ? "neg" : ""}">${p > 0 ? "+" : ""}${p}%</b>`; };
+const resultSpan = (v) => { const c = cents(v) || 0; return `<span class="${c > 0 ? "pos" : c < 0 ? "neg" : ""}">${c > 0 ? "+" : c < 0 ? "−" : ""}${fmtEur(Math.abs(c))}</span>`; };
 const BET_TYPES = { btts: "BTTS", o15: "+1,5 buts", o25: "+2,5 buts", h15: "Domicile +1,5", a15: "Extérieur +1,5" };
 
 function betType(b) {
@@ -1232,7 +1234,7 @@ function bilanHTML() {
       <div class="h" style="text-align:left">${title}</div><div class="h">Paris</div><div class="h">Gagnés</div><div class="h">Résultat</div><div class="h">Rentab.</div>
       ${rows.map(([label, r]) => `<div class="t">${esc(label)}</div><div class="v">${r.n}</div>
         <div class="v">${pctSpan(Math.round((r.won / r.n) * 100))}</div>
-        <div class="v small ${r.returned - r.staked >= 0 ? "pos" : "neg"}">${r.returned - r.staked >= 0 ? "+" : "−"}${fmtEur(Math.abs(r.returned - r.staked))}</div>
+        <div class="v small">${resultSpan(r.returned - r.staked)}</div>
         <div class="v">${roiSpan((r.returned - r.staked) / r.staked)}</div>`).join("")}
     </div>`;
   const types = [...Object.values(BET_TYPES), "Buteur", "Cote boostée", "Combiné", "Autre"];
