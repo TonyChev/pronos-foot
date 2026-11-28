@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611280720";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611280740";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -247,9 +247,11 @@ function renderBoosts() {
   const good = boosts.filter((b) => b.level === "yes").length;
   $("#boosts").innerHTML = `<details class="card combos boosts" ${state.boostsOpen ? "open" : ""}>
     <summary><h2><span>Cotes boostées (${boosts.length})</span>${good ? `<span class="boost-badge">★ ${good} à jouer</span>` : ""}</h2></summary>
-    <p class="hint">Les seuls paris rentables de l'app : le boost paie plus que le vrai risque, alors que les autres paris paient la marge d'Unibet (~12 %).
+    <details class="info"><summary aria-label="Explications">ⓘ Infos</summary>
+      <p class="bubble">Les seuls paris rentables de l'app : le boost paie plus que le vrai risque, alors que les autres paris paient la marge d'Unibet (~12 %).
       Seules les offres à valeur positive sont affichées. Valeur estimée d'après le boost et la marge habituelle d'Unibet, sans analyse du match.
       Mise conseillée : <b>${fmtEur(suggestedStake())}</b> (dans la limite du plafond Unibet). Le règlement se fait à la main dans Mes paris.</p>
+    </details>
     ${boosts.map((b) => `<div class="combo">
       <div class="combo-title"><span class="dot ${b.level}"></span> ${BOOST_LABEL[b.level]}</div>
       <div class="combo-leg">
