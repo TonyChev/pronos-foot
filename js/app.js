@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611272355";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611280720";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -41,8 +41,8 @@ const state = {
   lbPeriod: "month",
   betsLoaded: false,       // premier chargement de mes paris reçu (évite des suggestions provisoires)
   combos: [],
-  combosOpen: true,        // blocs « Paris suggérés » et « Cotes boostées » dépliés par défaut ;
-  boostsOpen: true,        // seul un appui sur leur titre les replie (jusqu'au prochain chargement de l'app)
+  combosOpen: false,       // blocs « Pour le plaisir » et « Cotes boostées » repliés par défaut ;
+  boostsOpen: false,       // seul un appui sur leur titre les déplie (jusqu'au prochain chargement de l'app)
   reliability: null,       // résultat de « Fiabilité de mes avis », calculé à la demande
   user: null,
 };
