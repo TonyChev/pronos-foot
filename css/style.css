@@ -218,6 +218,9 @@ main { max-width: 680px; margin: 0 auto; padding: 14px 12px 0; }
 .info > summary { display: inline-block; list-style: none; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--aqua); padding: 2px 0; }
 .info > summary::-webkit-details-marker { display: none; }
 .info .bubble { position: relative; margin: 8px 0 0; padding: 10px 12px; border-radius: 6px; background: #263236; color: var(--hero-text); font-size: 13px; line-height: 1.45; }
+.info .bubble.warn { color: #ff5c8d; font-weight: 600; }
+.info .bubble + .bubble { margin-top: 6px; }
+.info .bubble + .bubble::before { display: none; }
 .info .bubble::before { content: ""; position: absolute; top: -6px; left: 14px; border: 6px solid transparent; border-top: 0; border-bottom-color: #263236; }
 .combos summary::-webkit-details-marker { display: none; }
 .combos summary h2 { margin: 0; font-size: 17px; display: flex; align-items: center; gap: 8px; text-transform: uppercase; font-style: italic; }

@@ -1,4 +1,4 @@
-import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611280740";
+import { initStore, store, onBets, onTransactions, onUser, onSettings, onFunBets, onPlayers, isConfigured } from "./store.js?v=202611280800";
 
 // Marchés suivis. h15 / a15 = « plus de 1,5 buts » de l'équipe à domicile / à l'extérieur.
 const MATCH_MARKETS = ["btts", "o15", "o25"];
@@ -187,14 +187,16 @@ function renderCombos() {
   const mine = realGoalsResult();
   $("#combos").innerHTML = `<details class="card combos" ${state.combosOpen ? "open" : ""}>
     <summary><h2><span>Pour le plaisir (${state.combos.length})</span></h2></summary>
-    <p class="hint warn">⚠ Pas rentables jusqu'ici. Rejoués sur ~500 matchs avec leur cote Unibet, tous les paris de buts
+    <details class="info"><summary aria-label="Explications">ⓘ Infos</summary>
+    <p class="bubble warn">⚠ Pas rentables jusqu'ici. Rejoués sur ~500 matchs avec leur cote Unibet, tous les paris de buts
       (BTTS, +1,5, +2,5, équipe +1,5, et leurs contraires) perdent en moyenne 10 à 20 € pour 100 € misés : la marge d'Unibet,
       que mes stats ne parviennent pas à battre${mine ? `. Tes ${mine.n} paris réels hors boosts : ${mine.roi > 0 ? "+" : ""}${Math.round(mine.roi * 100)} €
       pour 100 € misés` : ""}. Pour gagner de l'argent, privilégie les cotes boostées ; ces suggestions, à la plus petite mise.</p>
-    <p class="hint">Paris simples d'aujourd'hui et de demain à cote proche de 2 (entre 1,80 et 2,30) :
+    <p class="bubble">Paris simples d'aujourd'hui et de demain à cote proche de 2 (entre 1,80 et 2,30) :
       un pari gagné compense un pari perdu. Pas de combinés : la marge d'Unibet se paierait sur chaque match.
       Marchés de buts et buteurs, sans les paris
       sur lesquels Unibet est bien moins confiant que moi ; les matchs déjà dans un pari en cours sont exclus.</p>
+    </details>
     <div class="combo-sort">
       <span class="muted small">Trier par</span>
       ${[["p", "% passe"], ["date", "Date du match"]].map(([k, l]) =>
